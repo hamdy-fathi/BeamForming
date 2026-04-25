@@ -8,15 +8,6 @@ import {
   type BeamformingParams,
 } from "@/lib/api";
 
-/* ── Colour-map helper ──────────────────────────────────────────────── */
-function valueToColor(v: number): string {
-  // dark-theme heat: indigo → teal → white
-  const r = Math.round(30 + v * 200);
-  const g = Math.round(27 + v * 220);
-  const b = Math.round(75 + v * 140);
-  return `rgb(${Math.min(r, 255)},${Math.min(g, 255)},${Math.min(b, 255)})`;
-}
-
 /* ── Slider component ───────────────────────────────────────────────── */
 function Slider({
   label,
@@ -68,6 +59,7 @@ export default function BeamformingPage() {
   const [loading, setLoading] = useState(false);
   const mapCanvasRef = useRef<HTMLCanvasElement>(null);
   const profileCanvasRef = useRef<HTMLCanvasElement>(null);
+  const polarCanvasRef = useRef<HTMLCanvasElement>(null);
   const windowCanvasRef = useRef<HTMLCanvasElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -93,7 +85,7 @@ export default function BeamformingPage() {
 
   useEffect(() => { compute(); }, [compute]);
 
-  // draw interference map
+  // draw interference map + steering angle line
   useEffect(() => {
     if (!result?.interference_map?.map || !mapCanvasRef.current) return;
     const canvas = mapCanvasRef.current;
@@ -109,17 +101,42 @@ export default function BeamformingPage() {
       for (let x = 0; x < w; x++) {
         const v = Math.max(0, Math.min(1, map[y][x]));
         const idx = (y * w + x) * 4;
-        // cool desaturated heat: dark slate → warm gray
-        imgData.data[idx + 0] = Math.round(17 + v * 180);   // R
-        imgData.data[idx + 1] = Math.round(19 + v * 170);   // G
-        imgData.data[idx + 2] = Math.round(36 + v * 120);   // B
+        imgData.data[idx + 0] = Math.round(17 + v * 180);
+        imgData.data[idx + 1] = Math.round(19 + v * 170);
+        imgData.data[idx + 2] = Math.round(36 + v * 120);
         imgData.data[idx + 3] = 255;
       }
     }
     ctx.putImageData(imgData, 0, 0);
-  }, [result]);
 
-  // draw beam profile
+    // Draw steering angle radial line from bottom-center outward
+    const steerRad = (params.steering_angle * Math.PI) / 180;
+    const cx = w / 2;
+    const cy = h;         // emission from bottom
+    const lineLen = Math.sqrt(w * w + h * h);
+    const ex = cx + Math.sin(steerRad) * lineLen;
+    const ey = cy - Math.cos(steerRad) * lineLen;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 220, 80, 0.85)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 5]);
+    ctx.shadowColor = "rgba(255, 200, 0, 0.6)";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.restore();
+
+    // Label
+    ctx.fillStyle = "rgba(255, 220, 80, 0.9)";
+    ctx.font = "bold 11px monospace";
+    ctx.textAlign = "center";
+    ctx.fillText(`${params.steering_angle}°`, cx + Math.sin(steerRad) * 40, cy - Math.cos(steerRad) * 40 - 6);
+  }, [result, params.steering_angle]);
+
+  // draw Cartesian beam profile
   useEffect(() => {
     if (!result?.beam_profile || !profileCanvasRef.current) return;
     const canvas = profileCanvasRef.current;
@@ -143,6 +160,7 @@ export default function BeamformingPage() {
       ctx.stroke();
       ctx.fillStyle = "#555968";
       ctx.font = "10px monospace";
+      ctx.textAlign = "left";
       ctx.fillText(`${db} dB`, 4, y - 2);
     }
 
@@ -167,6 +185,17 @@ export default function BeamformingPage() {
     }
     ctx.stroke();
 
+    // steering angle vertical indicator
+    const steerX = ((params.steering_angle + 90) / 180) * W;
+    ctx.strokeStyle = "rgba(255, 220, 80, 0.7)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(steerX, 0);
+    ctx.lineTo(steerX, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
     // -3dB line
     ctx.strokeStyle = "#c0635f";
     ctx.lineWidth = 1;
@@ -181,7 +210,101 @@ export default function BeamformingPage() {
     ctx.font = "10px monospace";
     ctx.textAlign = "left";
     ctx.fillText("-3 dB", W - 42, y3db - 4);
-  }, [result]);
+  }, [result, params.steering_angle]);
+
+  // draw polar beam profile
+  useEffect(() => {
+    if (!result?.beam_profile || !polarCanvasRef.current) return;
+    const canvas = polarCanvasRef.current;
+    const ctx = canvas.getContext("2d")!;
+    const { angles, magnitudes_db } = result.beam_profile;
+    const W = 300, H = 300;
+    canvas.width = W;
+    canvas.height = H;
+    const cx = W / 2, cy = H / 2;
+    const maxR = W / 2 - 20;
+
+    ctx.fillStyle = "#191c24";
+    ctx.fillRect(0, 0, W, H);
+
+    // concentric dB rings at 0, -20, -40, -60
+    const dbLevels = [0, -20, -40, -60];
+    dbLevels.forEach((db) => {
+      const r = ((db + 60) / 60) * maxR;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "#2a2f3b";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // label
+      ctx.fillStyle = "#555968";
+      ctx.font = "9px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`${db}`, cx + r + 2, cy);
+    });
+
+    // cross hairs
+    ctx.strokeStyle = "#2a2f3b";
+    ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(cx, cy - maxR - 10); ctx.lineTo(cx, cy + maxR + 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - maxR - 10, cy); ctx.lineTo(cx + maxR + 10, cy); ctx.stroke();
+
+    // angle labels (0° top, 90° right, etc.)
+    const labelAngles = [0, 30, 60, 90, -30, -60, -90];
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "9px monospace";
+    labelAngles.forEach((a) => {
+      const rad = (a - 90) * Math.PI / 180;
+      const lx = cx + (maxR + 14) * Math.cos(rad);
+      const ly = cy + (maxR + 14) * Math.sin(rad);
+      ctx.textAlign = "center";
+      ctx.fillText(`${a}°`, lx, ly + 3);
+    });
+
+    // filled polar shape
+    ctx.beginPath();
+    let first = true;
+    for (let i = 0; i < angles.length; i++) {
+      const angleDeg = angles[i];
+      const db = Math.max(-60, magnitudes_db[i]);
+      const r = ((db + 60) / 60) * maxR;
+      // angles: 0° = top, positive = right → convert to canvas angle
+      const rad = (angleDeg - 90) * Math.PI / 180;
+      const px = cx + r * Math.cos(rad);
+      const py = cy + r * Math.sin(rad);
+      if (first) { ctx.moveTo(px, py); first = false; }
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    // gradient fill
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+    grad.addColorStop(0, "rgba(110,168,160,0.55)");
+    grad.addColorStop(1, "rgba(110,168,160,0.05)");
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    ctx.strokeStyle = "#6ea8a0";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // steering angle indicator line on polar
+    const steerRad = (params.steering_angle - 90) * Math.PI / 180;
+    ctx.strokeStyle = "rgba(255, 220, 80, 0.85)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + (maxR + 10) * Math.cos(steerRad), cy + (maxR + 10) * Math.sin(steerRad));
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // title
+    ctx.fillStyle = "#555968";
+    ctx.font = "10px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText("Polar (dB)", 4, 12);
+  }, [result, params.steering_angle]);
 
   // draw window weights
   useEffect(() => {
@@ -216,13 +339,23 @@ export default function BeamformingPage() {
     setParams((prev) => ({ ...prev, [key]: value }));
   };
 
+  // Medium speed preset handler
+  const handleMediumPreset = (preset: string) => {
+    if (preset === "em") updateParam("medium_speed", 3e8);
+    else if (preset === "tissue") updateParam("medium_speed", 1540);
+  };
+
+  const mediumPreset =
+    params.medium_speed === 3e8 ? "em" :
+    params.medium_speed === 1540 ? "tissue" : "custom";
+
   return (
     <div className="mx-auto max-w-screen-2xl p-4">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Beamforming Core</h1>
           <p className="text-sm text-text-secondary">
-            Phased Array Interference & Beam Profile
+            Phased Array Interference &amp; Beam Profile
           </p>
         </div>
         {loading && (
@@ -274,6 +407,35 @@ export default function BeamformingPage() {
             onChange={(v) => updateParam("snr", v)}
           />
 
+          {/* Medium Speed */}
+          <div className="flex flex-col gap-1 border-t border-border pt-3">
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+              Medium / Application
+            </span>
+            <div className="flex gap-2 mt-1">
+              <button
+                onClick={() => handleMediumPreset("em")}
+                className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${mediumPreset === "em" ? "bg-accent-teal/20 border border-accent-teal text-accent-teal" : "border border-border text-text-muted hover:text-text-primary"}`}
+              >
+                EM Wave
+                <span className="block text-[10px] opacity-70">3×10⁸ m/s</span>
+              </button>
+              <button
+                onClick={() => handleMediumPreset("tissue")}
+                className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${mediumPreset === "tissue" ? "bg-accent-red/20 border border-accent-red text-accent-red" : "border border-border text-text-muted hover:text-text-primary"}`}
+              >
+                Sound / Tissue
+                <span className="block text-[10px] opacity-70">1540 m/s</span>
+              </button>
+            </div>
+            <Slider
+              label="Medium Speed"
+              value={params.medium_speed}
+              min={300} max={3e8} step={10} unit="m/s"
+              onChange={(v) => updateParam("medium_speed", v)}
+            />
+          </div>
+
           {/* Signal Type */}
           <div className="flex flex-col gap-1">
             <span className="text-xs text-text-secondary">Signal Type</span>
@@ -317,7 +479,6 @@ export default function BeamformingPage() {
                 )}
               </select>
             </div>
-            {/* window info */}
             {windows.find((w: any) => w.type === params.window_type) && (
               <p className="mt-2 text-xs text-text-muted">
                 {windows.find((w: any) => w.type === params.window_type)?.description}
@@ -369,16 +530,29 @@ export default function BeamformingPage() {
             </div>
           </div>
 
-          {/* Beam Profile */}
+          {/* Beam Profiles — Cartesian + Polar side by side */}
           <div className="rounded-lg border border-border bg-bg-surface p-4">
             <h2 className="mb-3 text-sm font-semibold text-text-primary uppercase tracking-wider">
-              Beam Profile (dB)
+              Beam Profile
             </h2>
-            <canvas
-              ref={profileCanvasRef}
-              className="w-full rounded border border-border"
-              style={{ height: 300 }}
-            />
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+              <div className="flex-1">
+                <p className="mb-1 text-xs text-text-muted">Cartesian (dB)</p>
+                <canvas
+                  ref={profileCanvasRef}
+                  className="w-full rounded border border-border"
+                  style={{ height: 300 }}
+                />
+              </div>
+              <div className="flex-shrink-0">
+                <p className="mb-1 text-xs text-text-muted">Polar (rose)</p>
+                <canvas
+                  ref={polarCanvasRef}
+                  className="rounded border border-border"
+                  style={{ width: 300, height: 300 }}
+                />
+              </div>
+            </div>
           </div>
 
           {/* Current Parameters Summary */}

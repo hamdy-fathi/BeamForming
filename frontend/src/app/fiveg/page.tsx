@@ -21,6 +21,24 @@ const DEFAULT_USERS = [
 const TOWER_COLORS = ["#22c55e", "#3b82f6", "#f59e0b"];
 const USER_COLORS = ["#ef4444", "#a855f7"];
 
+function TowerSlider({ label, value, min, max, step, unit, onChange }: {
+  label: string; value: number; min: number; max: number; step: number; unit?: string; onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex justify-between text-[10px]">
+        <span className="text-text-muted">{label}</span>
+        <span className="font-mono text-text-primary">
+          {value >= 1e9 ? `${(value / 1e9).toFixed(1)}G` : value >= 1e6 ? `${(value / 1e6).toFixed(0)}M` : value}
+          {unit ? ` ${unit}` : ""}
+        </span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))} className="w-full" style={{ height: 14 }} />
+    </div>
+  );
+}
+
 export default function FiveGPage() {
   const [towers, setTowers] = useState(DEFAULT_TOWERS);
   const [users, setUsers] = useState(DEFAULT_USERS);
@@ -29,6 +47,14 @@ export default function FiveGPage() {
   const [loading, setLoading] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const moveStep = 20;
+
+  // drag refs
+  const draggingTowerRef = useRef<number | null>(null);
+  const draggingUserRef = useRef<number | null>(null);
+  const towersRef = useRef(towers);
+  const usersRef = useRef(users);
+  towersRef.current = towers;
+  usersRef.current = users;
 
   const runSimulation = useCallback(async (t: typeof towers, u: typeof users) => {
     setLoading(true);
@@ -43,33 +69,40 @@ export default function FiveGPage() {
 
   useEffect(() => {
     runSimulation(towers, users);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-simulate when tower params change (with debounce)
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      runSimulation(towers, users);
+    }, 300);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [towers]);
 
   // keyboard controls
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       let dx = 0, dy = 0;
-      // User 1: Arrow keys
       if (activeUser === 0) {
         if (e.key === "ArrowUp") dy = -moveStep;
         else if (e.key === "ArrowDown") dy = moveStep;
         else if (e.key === "ArrowLeft") dx = -moveStep;
         else if (e.key === "ArrowRight") dx = moveStep;
       }
-      // User 2: WASD
       if (activeUser === 1) {
         if (e.key === "w" || e.key === "W") dy = -moveStep;
         else if (e.key === "s" || e.key === "S") dy = moveStep;
         else if (e.key === "a" || e.key === "A") dx = -moveStep;
         else if (e.key === "d" || e.key === "D") dx = moveStep;
       }
-      // Switch active user with Tab
       if (e.key === "Tab") {
         e.preventDefault();
         setActiveUser((prev) => (prev === 0 ? 1 : 0));
         return;
       }
-
       if (dx !== 0 || dy !== 0) {
         e.preventDefault();
         setUsers((prev) => {
@@ -86,6 +119,81 @@ export default function FiveGPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [activeUser, towers, runSimulation]);
+
+  // canvas coordinate helper
+  const canvasToSim = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((clientX - rect.left) / rect.width) * CANVAS_W,
+      y: ((clientY - rect.top) / rect.height) * CANVAS_H,
+    };
+  }, []);
+
+  // Mouse events for dragging towers
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = canvasToSim(e.clientX, e.clientY);
+    const tResult = result?.towers || [];
+    // Check towers first
+    for (let i = 0; i < tResult.length; i++) {
+      const t = tResult[i];
+      const dx = x - t.position.x, dy = y - t.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 22) {
+        draggingTowerRef.current = i;
+        e.preventDefault();
+        return;
+      }
+    }
+    // Check users
+    const u = usersRef.current;
+    for (let i = 0; i < u.length; i++) {
+      const dx = x - u[i].x, dy = y - u[i].y;
+      if (Math.sqrt(dx * dx + dy * dy) < 16) {
+        draggingUserRef.current = i;
+        e.preventDefault();
+        return;
+      }
+    }
+  }, [canvasToSim, result]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = canvasToSim(e.clientX, e.clientY);
+    if (draggingTowerRef.current !== null) {
+      const i = draggingTowerRef.current;
+      setTowers(prev => {
+        const next = [...prev];
+        next[i] = {
+          ...next[i],
+          position: {
+            x: Math.max(20, Math.min(CANVAS_W - 20, x)),
+            y: Math.max(20, Math.min(CANVAS_H - 20, y)),
+          }
+        };
+        return next;
+      });
+    } else if (draggingUserRef.current !== null) {
+      const i = draggingUserRef.current;
+      setUsers(prev => {
+        const next = [...prev];
+        next[i] = {
+          x: Math.max(20, Math.min(CANVAS_W - 20, x)),
+          y: Math.max(20, Math.min(CANVAS_H - 20, y)),
+        };
+        return next;
+      });
+    }
+  }, [canvasToSim]);
+
+  const handleMouseUp = useCallback(() => {
+    const wasDraggingTower = draggingTowerRef.current !== null;
+    const wasDraggingUser = draggingUserRef.current !== null;
+    draggingTowerRef.current = null;
+    draggingUserRef.current = null;
+    if (wasDraggingTower || wasDraggingUser) {
+      runSimulation(towersRef.current, usersRef.current);
+    }
+  }, [runSimulation]);
 
   // draw canvas
   useEffect(() => {
@@ -121,26 +229,26 @@ export default function FiveGPage() {
       ctx.setLineDash([6, 4]);
       ctx.stroke();
       ctx.setLineDash([]);
-
-      // fill
       ctx.fillStyle = TOWER_COLORS[i] + "08";
       ctx.fill();
     });
 
-    // draw connectivity beams
+    // draw connectivity beams — one cone per connection (multi-user fix)
     towerResults.forEach((t: any, i: number) => {
-      (t.connections || []).forEach((conn: any) => {
+      const conns: any[] = t.connections || [];
+      conns.forEach((conn: any, connIdx: number) => {
         const u = userResults[conn.user_id];
         if (!u) return;
         const alpha = Math.max(0.15, conn.signal_strength / 100);
-
-        // beam cone
         const dx = u.position.x - t.position.x;
         const dy = u.position.y - t.position.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         const angle = Math.atan2(dy, dx);
-        const spread = 0.15; // beam spread angle
+        // Slightly offset spread per connection so two cones are visually distinct
+        const spread = 0.12 + connIdx * 0.04;
+        const userColor = USER_COLORS[conn.user_id] || TOWER_COLORS[i];
 
+        // filled cone
         ctx.beginPath();
         ctx.moveTo(t.position.x, t.position.y);
         ctx.lineTo(
@@ -152,14 +260,15 @@ export default function FiveGPage() {
           t.position.y + dist * Math.sin(angle + spread)
         );
         ctx.closePath();
-        ctx.fillStyle = TOWER_COLORS[i] + Math.round(alpha * 40).toString(16).padStart(2, "0");
+        // blend tower color with user color
+        ctx.fillStyle = TOWER_COLORS[i] + Math.round(alpha * 35).toString(16).padStart(2, "0");
         ctx.fill();
 
-        // center line
+        // center line tinted with user color
         ctx.beginPath();
         ctx.moveTo(t.position.x, t.position.y);
         ctx.lineTo(u.position.x, u.position.y);
-        ctx.strokeStyle = TOWER_COLORS[i] + Math.round(alpha * 255).toString(16).padStart(2, "0");
+        ctx.strokeStyle = userColor + Math.round(alpha * 200).toString(16).padStart(2, "0");
         ctx.lineWidth = 2;
         ctx.stroke();
       });
@@ -167,7 +276,12 @@ export default function FiveGPage() {
 
     // draw towers
     towerResults.forEach((t: any, i: number) => {
-      // tower body
+      const isDragging = draggingTowerRef.current === i;
+      // glow for dragging
+      if (isDragging) {
+        ctx.shadowColor = TOWER_COLORS[i];
+        ctx.shadowBlur = 16;
+      }
       ctx.fillStyle = TOWER_COLORS[i];
       ctx.beginPath();
       ctx.moveTo(t.position.x, t.position.y - 18);
@@ -175,8 +289,15 @@ export default function FiveGPage() {
       ctx.lineTo(t.position.x + 10, t.position.y + 10);
       ctx.closePath();
       ctx.fill();
+      ctx.shadowBlur = 0;
 
-      // label
+      // drag handle ring
+      ctx.beginPath();
+      ctx.arc(t.position.x, t.position.y - 4, 14, 0, Math.PI * 2);
+      ctx.strokeStyle = TOWER_COLORS[i] + (isDragging ? "cc" : "44");
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
       ctx.fillStyle = "#e4e6ef";
       ctx.font = "bold 11px monospace";
       ctx.textAlign = "center";
@@ -200,26 +321,35 @@ export default function FiveGPage() {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(`U${i + 1}`, u.x, u.y);
+      ctx.textBaseline = "alphabetic";
     });
 
   }, [result, users, activeUser]);
+
+  const updateTowerParam = (i: number, key: string, value: number) => {
+    setTowers(prev => prev.map((t, idx) => idx === i ? { ...t, [key]: value } : t));
+  };
 
   return (
     <div className="mx-auto max-w-screen-2xl p-4">
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-text-primary">5G Simulator</h1>
         <p className="text-sm text-text-secondary">
-          3 towers, 2 users — use Arrow Keys (User 1) / WASD (User 2) / Tab to switch
+          3 towers, 2 users — drag towers/users on canvas | Arrow Keys (U1) / WASD (U2) / Tab to switch
         </p>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+      <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         {/* Canvas */}
         <div className="rounded-lg border border-border bg-bg-surface p-4">
           <canvas
             ref={canvasRef}
-            className="w-full rounded border border-border"
+            className="w-full rounded border border-border cursor-grab active:cursor-grabbing"
             style={{ maxHeight: 600, aspectRatio: `${CANVAS_W}/${CANVAS_H}` }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
           />
           <div className="mt-3 flex gap-4 text-xs text-text-muted">
             <span className="flex items-center gap-1">
@@ -230,26 +360,26 @@ export default function FiveGPage() {
               <span className="inline-block h-3 w-3 rounded-full" style={{ background: USER_COLORS[1] }} />
               User 2 (WASD){activeUser === 1 && " ← active"}
             </span>
-            <span className="ml-auto">Tab = switch user</span>
+            <span className="ml-auto">Tab = switch · Drag towers/users</span>
           </div>
         </div>
 
         {/* Tower Parameter Cards */}
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: "calc(100vh - 120px)" }}>
           {loading && (
             <span className="text-xs text-accent-green animate-pulse">Updating…</span>
           )}
 
-          {(result?.towers || DEFAULT_TOWERS).map((t: any, i: number) => {
-            const params = t.parameters || t;
-            const conns = t.connections || [];
+          {towers.map((tower, i) => {
+            const tResult = (result?.towers || [])[i];
+            const conns: any[] = tResult?.connections || [];
             return (
               <div
                 key={i}
                 className="rounded-lg border bg-bg-surface p-4 transition-colors"
                 style={{ borderColor: TOWER_COLORS[i] + "66" }}
               >
-                <div className="mb-2 flex items-center gap-2">
+                <div className="mb-3 flex items-center gap-2">
                   <span
                     className="inline-block h-3 w-3 rounded-sm"
                     style={{ background: TOWER_COLORS[i] }}
@@ -265,35 +395,37 @@ export default function FiveGPage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <div className="flex justify-between text-text-secondary">
-                    <span>Elements</span>
-                    <span className="font-mono text-text-primary">{params.num_elements}</span>
-                  </div>
-                  <div className="flex justify-between text-text-secondary">
-                    <span>Spacing</span>
-                    <span className="font-mono text-text-primary">{params.element_spacing}λ</span>
-                  </div>
-                  <div className="flex justify-between text-text-secondary">
-                    <span>Freq</span>
-                    <span className="font-mono text-text-primary">
-                      {((params.frequency || 28e9) / 1e9).toFixed(1)} GHz
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-text-secondary">
-                    <span>Steer</span>
-                    <span className="font-mono text-text-primary">
-                      {(params.steering_angle ?? 0).toFixed(1)}°
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-text-secondary">
-                    <span>Window</span>
-                    <span className="font-mono text-text-primary">{params.window_type}</span>
-                  </div>
-                  <div className="flex justify-between text-text-secondary">
-                    <span>SNR</span>
-                    <span className="font-mono text-text-primary">{params.snr}</span>
-                  </div>
+                {/* Editable sliders */}
+                <div className="space-y-2">
+                  <TowerSlider
+                    label="Elements" value={tower.num_elements}
+                    min={4} max={128} step={4}
+                    onChange={(v) => updateTowerParam(i, "num_elements", v)}
+                  />
+                  <TowerSlider
+                    label="Coverage (m)" value={tower.coverage_radius}
+                    min={100} max={1000} step={50}
+                    onChange={(v) => updateTowerParam(i, "coverage_radius", v)}
+                  />
+                  <TowerSlider
+                    label="Frequency" value={tower.frequency}
+                    min={1e9} max={100e9} step={1e9} unit="Hz"
+                    onChange={(v) => updateTowerParam(i, "frequency", v)}
+                  />
+                  <TowerSlider
+                    label="SNR" value={tower.snr}
+                    min={0} max={500} step={10}
+                    onChange={(v) => updateTowerParam(i, "snr", v)}
+                  />
+                </div>
+
+                {/* Position info */}
+                <div className="mt-2 flex gap-3 text-[10px] text-text-muted border-t border-border pt-2">
+                  <span>x: {Math.round(tower.position.x)}</span>
+                  <span>y: {Math.round(tower.position.y)}</span>
+                  {tResult?.parameters?.steering_angle !== undefined && (
+                    <span className="ml-auto">steer: {tResult.parameters.steering_angle.toFixed(1)}°</span>
+                  )}
                 </div>
 
                 {conns.length > 0 && (
