@@ -92,6 +92,7 @@ class FiveGSimulator:
         for t in self.towers:
             sim: BeamformingSimulator = t["simulator"]
             connected = t["connected_users"]
+            user_beams = []
 
             if len(connected) == 0:
                 # no user in range → default broadside
@@ -104,12 +105,27 @@ class FiveGSimulator:
                 # auto-adjust parameters
                 sim.update_params(steering_angle=angle)
             else:
-                # two users → steer to midpoint (simplified MU-MIMO)
-                positions = [self.users[uid]["position"] for uid in connected]
-                mid_x = np.mean([p[0] for p in positions])
-                mid_y = np.mean([p[1] for p in positions])
-                angle = _angle_between(t["position"], (mid_x, mid_y))
-                sim.update_params(steering_angle=angle)
+                for uid in connected:
+                    upos = self.users[uid]["position"]
+                    angle = _angle_between(t["position"], upos)
+
+                    temp_sim = BeamformingSimulator(
+                        num_elements=sim.num_elements,
+                        element_spacing=sim.element_spacing,
+                        frequency=sim.frequency,
+                        steering_angle=angle,
+                        snr=sim.snr,
+                        window_type=sim.window_type,
+                        medium_speed=self.MEDIUM_SPEED,
+                    )
+
+                    user_beams.append({
+                        "user_id": uid,
+                        "steering_angle": round(angle, 2),
+                        "beam_profile": temp_sim.beam_profile(num_points=181),
+                    })
+
+                sim.update_params(steering_angle=user_beams[0]["steering_angle"])
 
             # get beam profile
             profile = sim.beam_profile(num_points=181)
@@ -149,6 +165,7 @@ class FiveGSimulator:
                 },
                 "beam_profile": profile,
                 "connections": connections,
+                "multi_user_beams": user_beams if len(connected) > 1 else None,
             })
 
         return {

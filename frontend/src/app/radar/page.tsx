@@ -389,7 +389,7 @@ export default function RadarPage() {
                     </div>
                   ) : (
                     <div className="flex gap-3 text-text-muted">
-                      <span>{(t.distance/1000).toFixed(1)} km</span>
+                      <span>{(t.distance / 1000).toFixed(1)} km</span>
                       <span>{t.angle}°</span>
                       <span>{t.size}m</span>
                     </div>
@@ -417,7 +417,7 @@ export default function RadarPage() {
                   {sweepResult.detected_targets.map((d: any, i: number) => (
                     <tr key={i} className="border-b border-border/40">
                       <td className="py-1 text-text-primary">T{d.target_id + 1}</td>
-                      <td className="py-1 text-text-secondary">{(d.distance/1000).toFixed(1)} km</td>
+                      <td className="py-1 text-text-secondary">{(d.distance / 1000).toFixed(1)} km</td>
                       <td className="py-1 text-text-secondary">{d.angle}°</td>
                       <td className="py-1 font-mono text-accent-amber">{d.signal_level.toFixed(1)} dB</td>
                       <td className="py-1 font-mono text-accent-teal">{d.estimated_size != null ? `${d.estimated_size} m` : "—"}</td>
