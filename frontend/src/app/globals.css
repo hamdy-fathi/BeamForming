@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* ── Dark palette: slate-based, desaturated, professional ── */
+  --color-bg-primary: #111318;
+  --color-bg-surface: #191c24;
+  --color-bg-elevated: #21252f;
+  --color-border: #2a2f3b;
+  --color-border-focus: #3d4455;
+  --color-text-primary: #d4d7e0;
+  --color-text-secondary: #8a8f9e;
+  --color-text-muted: #555968;
+
+  /* Accents: muted, desaturated — no neon */
+  --color-accent-teal: #6ea8a0;
+  --color-accent-blue: #6b8cbe;
+  --color-accent-green: #6da87a;
+  --color-accent-amber: #c4985a;
+  --color-accent-red: #c0635f;
+  --color-accent-purple: #9480b3;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a2f3b #111318;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #111318;
+  color: #d4d7e0;
+  font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+}
+
+canvas {
+  display: block;
+}
+
+/* Range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: #2a2f3b;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8a8f9e;
+  cursor: pointer;
+  border: 2px solid #111318;
+  transition: background 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #d4d7e0;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #8a8f9e;
+  cursor: pointer;
+  border: 2px solid #111318;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Select styling */
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8f9e' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  -webkit-appearance: none;
+  appearance: none;
+}
