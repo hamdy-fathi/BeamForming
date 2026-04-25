@@ -136,7 +136,7 @@ class BeamformingSimulator:
             r = np.sqrt(dx**2 + dy**2) + 1e-30
             # steering phase
             steer_phase = self.k * ex * np.sin(self.steering_angle_rad)
-            field += self.weights[i] * np.exp(1j * (self.k * r - steer_phase + self.phase_offset)) / np.sqrt(r)
+            field += self.weights[i] * np.exp(1j * (self.k * r + steer_phase + self.phase_offset)) / np.sqrt(r)
 
         intensity = np.abs(field) ** 2
         # normalise to [0, 1]

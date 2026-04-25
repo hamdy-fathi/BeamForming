@@ -96,32 +96,70 @@ export default function BeamformingPage() {
     canvas.width = w;
     canvas.height = h;
 
+    // Inferno-inspired colormap: black → deep purple → orange → yellow → white
+    const infernoMap = (t: number): [number, number, number] => {
+      // Clamp t
+      t = Math.max(0, Math.min(1, t));
+      // Color stops: 0→black, 0.2→deep indigo, 0.45→magenta/red, 0.7→orange, 0.9→yellow, 1.0→white
+      let r: number, g: number, b: number;
+      if (t < 0.2) {
+        const s = t / 0.2;
+        r = Math.round(s * 45);
+        g = Math.round(s * 10);
+        b = Math.round(10 + s * 80);
+      } else if (t < 0.45) {
+        const s = (t - 0.2) / 0.25;
+        r = Math.round(45 + s * 155);
+        g = Math.round(10 + s * 20);
+        b = Math.round(90 - s * 10);
+      } else if (t < 0.7) {
+        const s = (t - 0.45) / 0.25;
+        r = Math.round(200 + s * 45);
+        g = Math.round(30 + s * 110);
+        b = Math.round(80 - s * 60);
+      } else if (t < 0.9) {
+        const s = (t - 0.7) / 0.2;
+        r = Math.round(245 + s * 10);
+        g = Math.round(140 + s * 100);
+        b = Math.round(20 + s * 30);
+      } else {
+        const s = (t - 0.9) / 0.1;
+        r = Math.round(255);
+        g = Math.round(240 + s * 15);
+        b = Math.round(50 + s * 205);
+      }
+      return [r, g, b];
+    };
+
+    // Flip vertically: read row (h-1-y) so array elements (y=0 in data) appear at canvas bottom
     const imgData = ctx.createImageData(w, h);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        const v = Math.max(0, Math.min(1, map[y][x]));
+        const srcRow = h - 1 - y; // flip vertically
+        const v = Math.max(0, Math.min(1, map[srcRow][x]));
+        const [cr, cg, cb] = infernoMap(v);
         const idx = (y * w + x) * 4;
-        imgData.data[idx + 0] = Math.round(17 + v * 180);
-        imgData.data[idx + 1] = Math.round(19 + v * 170);
-        imgData.data[idx + 2] = Math.round(36 + v * 120);
+        imgData.data[idx + 0] = cr;
+        imgData.data[idx + 1] = cg;
+        imgData.data[idx + 2] = cb;
         imgData.data[idx + 3] = 255;
       }
     }
     ctx.putImageData(imgData, 0, 0);
 
-    // Draw steering angle radial line from bottom-center outward
+    // Draw steering angle radial line from bottom-center (array position) upward
     const steerRad = (params.steering_angle * Math.PI) / 180;
     const cx = w / 2;
-    const cy = h;         // emission from bottom
+    const cy = h;         // array is at bottom now
     const lineLen = Math.sqrt(w * w + h * h);
     const ex = cx + Math.sin(steerRad) * lineLen;
     const ey = cy - Math.cos(steerRad) * lineLen;
 
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 220, 80, 0.85)";
+    ctx.strokeStyle = "rgba(0, 230, 255, 0.85)";
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 5]);
-    ctx.shadowColor = "rgba(255, 200, 0, 0.6)";
+    ctx.shadowColor = "rgba(0, 210, 255, 0.6)";
     ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
@@ -130,7 +168,7 @@ export default function BeamformingPage() {
     ctx.restore();
 
     // Label
-    ctx.fillStyle = "rgba(255, 220, 80, 0.9)";
+    ctx.fillStyle = "rgba(0, 230, 255, 0.95)";
     ctx.font = "bold 11px monospace";
     ctx.textAlign = "center";
     ctx.fillText(`${params.steering_angle}°`, cx + Math.sin(steerRad) * 40, cy - Math.cos(steerRad) * 40 - 6);
@@ -522,7 +560,7 @@ export default function BeamformingPage() {
                   style={{
                     height: 200,
                     background:
-                      "linear-gradient(to bottom, rgb(197,187,155), rgb(110,168,160), rgb(17,19,24))",
+                      "linear-gradient(to bottom, rgb(255,255,255), rgb(255,240,50), rgb(245,140,20), rgb(200,30,80), rgb(45,10,90), rgb(0,0,10))",
                   }}
                 />
                 <span className="text-[10px] text-text-muted">Min</span>
