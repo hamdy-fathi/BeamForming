@@ -1,23 +1,25 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* ── Dark palette: slate-based, desaturated, professional ── */
-  --color-bg-primary: #111318;
-  --color-bg-surface: #191c24;
-  --color-bg-elevated: #21252f;
-  --color-border: #2a2f3b;
-  --color-border-focus: #3d4455;
-  --color-text-primary: #d4d7e0;
-  --color-text-secondary: #8a8f9e;
-  --color-text-muted: #555968;
+  /* ── Dark palette: deeper, richer ── */
+  --color-bg-primary: #060a13;
+  --color-bg-surface: #0c1019;
+  --color-bg-elevated: #141922;
+  --color-border: #1e2433;
+  --color-border-focus: #2d3548;
+  --color-text-primary: #e2e5ed;
+  --color-text-secondary: #8892a6;
+  --color-text-muted: #4d5568;
 
-  /* Accents: muted, desaturated — no neon */
-  --color-accent-teal: #6ea8a0;
-  --color-accent-blue: #6b8cbe;
-  --color-accent-green: #6da87a;
-  --color-accent-amber: #c4985a;
-  --color-accent-red: #c0635f;
-  --color-accent-purple: #9480b3;
+  /* Accent colors for card borders */
+  --color-accent-cyan: #06b6d4;
+  --color-accent-blue: #3b82f6;
+  --color-accent-teal: #14b8a6;
+  --color-accent-amber: #f59e0b;
+  --color-accent-red: #ef4444;
+  --color-accent-purple: #a855f7;
+  --color-accent-green: #22c55e;
+  --color-accent-pink: #ec4899;
 
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
@@ -25,7 +27,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a2f3b #111318;
+  scrollbar-color: #1e2433 #060a13;
 }
 
 html {
@@ -33,8 +35,8 @@ html {
 }
 
 body {
-  background-color: #111318;
-  color: #d4d7e0;
+  background-color: #060a13;
+  color: #e2e5ed;
   font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
 }
 
@@ -42,57 +44,329 @@ canvas {
   display: block;
 }
 
-/* Range slider */
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATED BORDER CARDS
+   Uses a rotating conic-gradient behind the card to create
+   a "scanning / loading" border sweep effect on hover.
+   ═══════════════════════════════════════════════════════════════ */
+
+.glow-card {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0c1019;
+  z-index: 0;
+}
+
+/* The rotating gradient border layer */
+.glow-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--card-angle, 0deg),
+    transparent 0%,
+    var(--card-color, #06b6d4) 10%,
+    transparent 20%,
+    transparent 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  animation: none;
+}
+
+/* Static border line visible at rest */
+.glow-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--card-color, #06b6d4) 25%, transparent);
+  pointer-events: none;
+  z-index: 1;
+  transition: border-color 0.3s ease;
+}
+
+/* Hover: show the rotating gradient and intensify the border */
+.glow-card:hover::before {
+  opacity: 1;
+  animation: borderSpin 2.5s linear infinite;
+}
+.glow-card:hover::after {
+  border-color: color-mix(in srgb, var(--card-color, #06b6d4) 50%, transparent);
+}
+
+/* Add a subtle ambient glow on hover */
+.glow-card:hover {
+  box-shadow: 0 0 30px -8px color-mix(in srgb, var(--card-color, #06b6d4) 20%, transparent);
+}
+
+@property --card-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes borderSpin {
+  to {
+    --card-angle: 360deg;
+  }
+}
+
+/* Card color variants */
+.glow-card-cyan  { --card-color: #06b6d4; }
+.glow-card-blue  { --card-color: #3b82f6; }
+.glow-card-amber { --card-color: #f59e0b; }
+.glow-card-green { --card-color: #22c55e; }
+.glow-card-purple { --card-color: #a855f7; }
+.glow-card-pink  { --card-color: #ec4899; }
+.glow-card-red   { --card-color: #ef4444; }
+.glow-card-teal  { --card-color: #14b8a6; }
+
+/* ═══════════════════════════════════════════════════════════════
+   RANGE SLIDERS — modern styled tracks
+   ═══════════════════════════════════════════════════════════════ */
+
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  border-radius: 2px;
-  background: #2a2f3b;
+  border-radius: 4px;
+  background: #1e2433;
   outline: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+input[type="range"]:hover {
+  background: #252d3e;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #8a8f9e;
+  background: #e2e5ed;
   cursor: pointer;
-  border: 2px solid #111318;
-  transition: background 0.15s;
+  border: 3px solid #060a13;
+  box-shadow: 0 0 0 2px #2d3548, 0 0 8px rgba(6, 182, 212, 0.3);
+  transition: box-shadow 0.2s, background 0.2s;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: #d4d7e0;
+  background: #fff;
+  box-shadow: 0 0 0 2px #06b6d4, 0 0 14px rgba(6, 182, 212, 0.5);
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: #8a8f9e;
+  background: #e2e5ed;
   cursor: pointer;
-  border: 2px solid #111318;
+  border: 3px solid #060a13;
+  box-shadow: 0 0 0 2px #2d3548;
 }
 
-/* Animations */
+input[type="range"]::-moz-range-thumb:hover {
+  background: #fff;
+  box-shadow: 0 0 0 2px #06b6d4;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COLLAPSIBLE SECTIONS
+   ═══════════════════════════════════════════════════════════════ */
+
+.section-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s ease;
+  overflow: hidden;
+}
+
+.section-collapse.collapsed {
+  grid-template-rows: 0fr;
+}
+
+.section-collapse > div {
+  overflow: hidden;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  padding: 6px 0;
+  transition: color 0.2s;
+}
+
+.section-header:hover {
+  color: #e2e5ed;
+}
+
+.section-header .chevron {
+  transition: transform 0.3s ease;
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.section-header.open .chevron {
+  transform: rotate(90deg);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SELECT STYLING
+   ═══════════════════════════════════════════════════════════════ */
+
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238892a6' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+select:focus {
+  outline: none;
+  border-color: #06b6d4;
+  box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.3);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SEGMENT CONTROL (pill toggle)
+   ═══════════════════════════════════════════════════════════════ */
+
+.segment-control {
+  display: flex;
+  background: #0c1019;
+  border-radius: 8px;
+  padding: 3px;
+  border: 1px solid #1e2433;
+  gap: 3px;
+}
+
+.segment-btn {
+  flex: 1;
+  padding: 8px 8px;
+  border-radius: 6px;
+  border: none;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  background: transparent;
+  color: #4d5568;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.segment-btn:hover:not(.active) {
+  color: #8892a6;
+  background: #141922;
+}
+
+.segment-btn.active {
+  color: #e2e5ed;
+  background: #141922;
+  box-shadow: 0 0 12px -3px var(--seg-color, #06b6d4);
+  border: 1px solid color-mix(in srgb, var(--seg-color, #06b6d4) 40%, transparent);
+}
+
+.segment-btn.active .seg-sub {
+  color: var(--seg-color, #06b6d4);
+}
+
+.segment-btn .seg-sub {
+  display: block;
+  font-size: 10px;
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STATUS CHIP (for computing state)
+   ═══════════════════════════════════════════════════════════════ */
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.status-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PARAMETER STAT BADGE
+   ═══════════════════════════════════════════════════════════════ */
+
+.stat-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #0c1019;
+  border: 1px solid #1e2433;
+  transition: border-color 0.2s;
+}
+
+.stat-badge:hover {
+  border-color: #2d3548;
+}
+
+.stat-badge .stat-label {
+  font-size: 10px;
+  text-transform: capitalize;
+  color: #4d5568;
+  letter-spacing: 0.02em;
+}
+
+.stat-badge .stat-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: #e2e5ed;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATIONS
+   ═══════════════════════════════════════════════════════════════ */
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.25s ease-out forwards;
+  animation: fadeIn 0.3s ease-out forwards;
 }
 
-/* Select styling */
-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238a8f9e' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-  -webkit-appearance: none;
-  appearance: none;
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
