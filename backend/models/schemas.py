@@ -50,12 +50,26 @@ class TowerConfig(BaseModel):
     coverage_radius: float = Field(500.0, gt=0)
     element_spacing: float = Field(0.5, ge=0.1, le=2.0)
     window_type: WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr: float = Field(200.0, ge=0, le=1000)
+    snr: float = Field(1000.0, ge=0, le=1000)
+    steering_angle: float = Field(0.0, ge=-90, le=90)
+    power_dbm: float = Field(30.0, ge=0, le=50)
+    kaiser_beta: float = Field(6.0, ge=0, le=20)
+
+
+class ObstacleConfig(BaseModel):
+    """A rectangular obstacle that blocks LOS and produces reflections."""
+    id: int = Field(ge=0)
+    x: float  # center x
+    y: float  # center y
+    width: float = Field(60.0, ge=20, le=200)
+    height: float = Field(60.0, ge=20, le=200)
+    reflection_loss_db: float = Field(6.0, ge=0, le=20)  # loss per bounce
 
 
 class FiveGRequest(BaseModel):
     towers: list[TowerConfig] = Field(..., min_length=3, max_length=3)
     users: list[Position] = Field(..., min_length=1, max_length=2)
+    obstacles: list[ObstacleConfig] = Field(default_factory=list, max_length=5)
 
 
 class UserMoveRequest(BaseModel):

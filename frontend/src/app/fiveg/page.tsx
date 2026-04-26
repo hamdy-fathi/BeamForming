@@ -1,481 +1,600 @@
 "use client";
-
 import { useState, useEffect, useRef, useCallback } from "react";
 import { simulate5G } from "@/lib/api";
+import {
+  TOWER_COLORS, USER_COLORS, DEFAULT_TOWERS, DEFAULT_USERS, DEFAULT_OBSTACLES,
+  SignalLegend, VizCheckboxes, TowerCard, UserCard,
+} from "./components";
 
-const CANVAS_W = 800;
-const CANVAS_H = 600;
-const SCALE = 0.5; // pixels per metre
-
-const DEFAULT_TOWERS = [
-  { position: { x: 200, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 200 },
-  { position: { x: 600, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 200 },
-  { position: { x: 400, y: 150 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 200 },
-];
-
-const DEFAULT_USERS = [
-  { x: 350, y: 350 },
-  { x: 500, y: 400 },
-];
-
-const TOWER_COLORS = ["#22c55e", "#3b82f6", "#f59e0b"];
-const USER_COLORS = ["#ef4444", "#a855f7"];
-
-function TowerSlider({ label, value, min, max, step, unit, onChange }: {
-  label: string; value: number; min: number; max: number; step: number; unit?: string; onChange: (v: number) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex justify-between text-[10px]">
-        <span className="text-text-muted">{label}</span>
-        <span className="font-mono text-text-primary">
-          {value >= 1e9 ? `${(value / 1e9).toFixed(1)}G` : value >= 1e6 ? `${(value / 1e6).toFixed(0)}M` : value}
-          {unit ? ` ${unit}` : ""}
-        </span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(Number(e.target.value))} className="w-full" style={{ height: 14 }} />
-    </div>
-  );
-}
+// Canvas renders at the actual element size — no fixed dimensions
 
 export default function FiveGPage() {
   const [towers, setTowers] = useState(DEFAULT_TOWERS);
   const [users, setUsers] = useState(DEFAULT_USERS);
-  const [activeUser, setActiveUser] = useState(0);
+  const [obstacles, setObstacles] = useState(DEFAULT_OBSTACLES);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [globalSnr, setGlobalSnr] = useState(250);
+  const [globalWindow, setGlobalWindow] = useState("kaiser");
+  const [globalBeta, setGlobalBeta] = useState(6.0);
+  const [addObstacleMode, setAddObstacleMode] = useState(false);
+  const [viz, setViz] = useState<Record<string, boolean>>({
+    beams: true, sidelobes: true, coverage: true, connections: true, grid: true,
+  });
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const moveStep = 20;
-
-  // drag refs
   const draggingTowerRef = useRef<number | null>(null);
   const draggingUserRef = useRef<number | null>(null);
+  const draggingObstacleRef = useRef<number | null>(null);
   const towersRef = useRef(towers);
   const usersRef = useRef(users);
+  const obstaclesRef = useRef(obstacles);
   towersRef.current = towers;
   usersRef.current = users;
+  obstaclesRef.current = obstacles;
 
-  const runSimulation = useCallback(async (t: typeof towers, u: typeof users) => {
+  const abortRef = useRef<AbortController | null>(null);
+  const runSim = useCallback(async (t: typeof towers, u: typeof users, obs?: typeof obstacles) => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     try {
-      const data = await simulate5G({ towers: t, users: u });
-      setResult(data);
-    } catch (e) {
-      console.error(e);
+      const towersWithGlobals = t.map(tw => ({
+        ...tw,
+        snr: globalSnr >= 1000 ? 1000 : globalSnr,
+        window_type: globalWindow,
+        kaiser_beta: globalBeta,
+      }));
+      const data = await simulate5G({
+        towers: towersWithGlobals,
+        users: u,
+        obstacles: obs ?? obstaclesRef.current,
+      });
+      if (!controller.signal.aborted) setResult(data);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.warn("5G sim error:", e?.message);
     }
-    setLoading(false);
-  }, []);
+    if (!controller.signal.aborted) setLoading(false);
+  }, [globalSnr, globalWindow, globalBeta]);
 
-  useEffect(() => {
-    runSimulation(towers, users);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { runSim(towers, users, obstacles); }, []);
 
-  // Re-simulate when tower params change (with debounce)
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      runSimulation(towers, users);
-    }, 300);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [towers]);
+    if (debRef.current) clearTimeout(debRef.current);
+    debRef.current = setTimeout(() => runSim(towers, users, obstacles), 400);
+  }, [towers, obstacles, globalSnr, globalWindow, globalBeta]);
 
-  // keyboard controls
+
+  // Keyboard
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const h = (e: KeyboardEvent) => {
       let dx = 0, dy = 0;
-      if (activeUser === 0) {
-        if (e.key === "ArrowUp") dy = -moveStep;
-        else if (e.key === "ArrowDown") dy = moveStep;
-        else if (e.key === "ArrowLeft") dx = -moveStep;
-        else if (e.key === "ArrowRight") dx = moveStep;
-      }
-      if (activeUser === 1) {
-        if (e.key === "w" || e.key === "W") dy = -moveStep;
-        else if (e.key === "s" || e.key === "S") dy = moveStep;
-        else if (e.key === "a" || e.key === "A") dx = -moveStep;
-        else if (e.key === "d" || e.key === "D") dx = moveStep;
-      }
-      if (e.key === "Tab") {
+      const step = 20;
+      if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+        if (e.key === "ArrowUp") dy = -step;
+        if (e.key === "ArrowDown") dy = step;
+        if (e.key === "ArrowLeft") dx = -step;
+        if (e.key === "ArrowRight") dx = step;
         e.preventDefault();
-        setActiveUser((prev) => (prev === 0 ? 1 : 0));
-        return;
-      }
-      if (dx !== 0 || dy !== 0) {
-        e.preventDefault();
-        setUsers((prev) => {
+        setUsers(prev => {
           const next = [...prev];
-          next[activeUser] = {
-            x: Math.max(20, Math.min(CANVAS_W - 20, next[activeUser].x + dx)),
-            y: Math.max(20, Math.min(CANVAS_H - 20, next[activeUser].y + dy)),
-          };
-          runSimulation(towers, next);
+          next[0] = { x: Math.max(20, Math.min(780, next[0].x + dx)), y: Math.max(20, Math.min(780, next[0].y + dy)) };
+          runSim(towers, next);
+          return next;
+        });
+      }
+      if (["w","W","a","A","s","S","d","D"].includes(e.key)) {
+        if (e.key.toLowerCase() === "w") dy = -step;
+        if (e.key.toLowerCase() === "s") dy = step;
+        if (e.key.toLowerCase() === "a") dx = -step;
+        if (e.key.toLowerCase() === "d") dx = step;
+        e.preventDefault();
+        setUsers(prev => {
+          const next = [...prev];
+          next[1] = { x: Math.max(20, Math.min(780, next[1].x + dx)), y: Math.max(20, Math.min(780, next[1].y + dy)) };
+          runSim(towers, next);
           return next;
         });
       }
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [activeUser, towers, runSimulation]);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [towers, runSim]);
 
-  // canvas coordinate helper
-  const canvasToSim = useCallback((clientX: number, clientY: number) => {
+  // Canvas coords
+  const canvasToSim = useCallback((cx: number, cy: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
+    const S = Math.min(rect.width, rect.height);
+    const ox = (rect.width - S) / 2, oy = (rect.height - S) / 2;
     return {
-      x: ((clientX - rect.left) / rect.width) * CANVAS_W,
-      y: ((clientY - rect.top) / rect.height) * CANVAS_H,
+      x: ((cx - rect.left - ox) / S) * 800,
+      y: ((cy - rect.top - oy) / S) * 800,
     };
   }, []);
 
-  // Mouse events for dragging towers
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = canvasToSim(e.clientX, e.clientY);
-    const tResult = result?.towers || [];
-    // Check towers first
-    for (let i = 0; i < tResult.length; i++) {
-      const t = tResult[i];
-      const dx = x - t.position.x, dy = y - t.position.y;
-      if (Math.sqrt(dx * dx + dy * dy) < 22) {
-        draggingTowerRef.current = i;
+
+    // Right-click to remove obstacle
+    if (e.button === 2) {
+      const obs = obstaclesRef.current;
+      for (let i = 0; i < obs.length; i++) {
+        const o = obs[i];
+        if (Math.abs(x - o.x) < o.width / 2 && Math.abs(y - o.y) < o.height / 2) {
+          setObstacles(prev => prev.filter((_, idx) => idx !== i));
+          e.preventDefault();
+          return;
+        }
+      }
+      return;
+    }
+
+    // Add obstacle mode — TOP PRIORITY: place obstacle anywhere
+    if (addObstacleMode && obstaclesRef.current.length < 5) {
+      const newId = obstaclesRef.current.length > 0
+        ? Math.max(...obstaclesRef.current.map(o => o.id)) + 1
+        : 0;
+      setObstacles(prev => [...prev, { id: newId, x, y, width: 60, height: 60, reflection_loss_db: 6 }]);
+      setAddObstacleMode(false);
+      e.preventDefault();
+      return;
+    }
+
+    // Check obstacles for dragging
+    const obs = obstaclesRef.current;
+    for (let i = 0; i < obs.length; i++) {
+      const o = obs[i];
+      if (Math.abs(x - o.x) < o.width / 2 && Math.abs(y - o.y) < o.height / 2) {
+        draggingObstacleRef.current = i;
         e.preventDefault();
         return;
       }
+    }
+
+    // Check towers
+    const tRes = result?.towers || [];
+    for (let i = 0; i < tRes.length; i++) {
+      const t = tRes[i];
+      const dx = x - t.position.x, dy = y - t.position.y;
+      if (Math.sqrt(dx * dx + dy * dy) < 25) { draggingTowerRef.current = i; e.preventDefault(); return; }
     }
     // Check users
     const u = usersRef.current;
     for (let i = 0; i < u.length; i++) {
       const dx = x - u[i].x, dy = y - u[i].y;
-      if (Math.sqrt(dx * dx + dy * dy) < 16) {
-        draggingUserRef.current = i;
-        e.preventDefault();
-        return;
-      }
+      if (Math.sqrt(dx * dx + dy * dy) < 18) { draggingUserRef.current = i; e.preventDefault(); return; }
     }
-  }, [canvasToSim, result]);
+  }, [canvasToSim, result, addObstacleMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = canvasToSim(e.clientX, e.clientY);
-    if (draggingTowerRef.current !== null) {
+    if (draggingObstacleRef.current !== null) {
+      const i = draggingObstacleRef.current;
+      setObstacles(prev => prev.map((o, idx) => idx === i ? { ...o, x: Math.max(40, Math.min(760, x)), y: Math.max(40, Math.min(760, y)) } : o));
+    } else if (draggingTowerRef.current !== null) {
       const i = draggingTowerRef.current;
-      setTowers(prev => {
-        const next = [...prev];
-        next[i] = {
-          ...next[i],
-          position: {
-            x: Math.max(20, Math.min(CANVAS_W - 20, x)),
-            y: Math.max(20, Math.min(CANVAS_H - 20, y)),
-          }
-        };
-        return next;
-      });
+      setTowers(prev => prev.map((t, idx) => idx === i ? { ...t, position: { x: Math.max(20, Math.min(780, x)), y: Math.max(20, Math.min(780, y)) } } : t));
     } else if (draggingUserRef.current !== null) {
       const i = draggingUserRef.current;
-      setUsers(prev => {
-        const next = [...prev];
-        next[i] = {
-          x: Math.max(20, Math.min(CANVAS_W - 20, x)),
-          y: Math.max(20, Math.min(CANVAS_H - 20, y)),
-        };
-        return next;
-      });
+      setUsers(prev => prev.map((u, idx) => idx === i ? { x: Math.max(20, Math.min(780, x)), y: Math.max(20, Math.min(780, y)) } : u));
     }
   }, [canvasToSim]);
 
   const handleMouseUp = useCallback(() => {
-    const wasDraggingTower = draggingTowerRef.current !== null;
-    const wasDraggingUser = draggingUserRef.current !== null;
+    const wasDragging = draggingTowerRef.current !== null || draggingUserRef.current !== null || draggingObstacleRef.current !== null;
     draggingTowerRef.current = null;
     draggingUserRef.current = null;
-    if (wasDraggingTower || wasDraggingUser) {
-      runSimulation(towersRef.current, usersRef.current);
-    }
-  }, [runSimulation]);
+    draggingObstacleRef.current = null;
+    if (wasDragging) runSim(towersRef.current, usersRef.current, obstaclesRef.current);
+  }, [runSim]);
 
-  // draw canvas
+  const handleContextMenu = useCallback((e: React.MouseEvent) => { e.preventDefault(); }, []);
+
+  // ═══════════════ CANVAS RENDERING ═══════════════
   useEffect(() => {
     if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d")!;
-    canvas.width = CANVAS_W;
-    canvas.height = CANVAS_H;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // background
-    ctx.fillStyle = "#0f1117";
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    // The sim uses 800x800 coordinate space; we map it to a centered square
+    const S = Math.min(W, H);
+    const ox = (W - S) / 2, oy = (H - S) / 2;
+    const scale = S / 800;
+    const CENTER = ox + S / 2;
+    const CY = oy + S / 2;
+    const RADIUS = S / 2 - 40 * scale;
 
-    // grid
-    ctx.strokeStyle = "#1a1d27";
-    ctx.lineWidth = 1;
-    for (let x = 0; x < CANVAS_W; x += 50) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
-    }
-    for (let y = 0; y < CANVAS_H; y += 50) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
+    // Helper: sim coords (0-800) to canvas pixel coords
+    const sx = (x: number) => ox + x * scale;
+    const sy = (y: number) => oy + y * scale;
+
+    // BG
+    ctx.fillStyle = "#080c14";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    if (viz.grid) {
+      ctx.strokeStyle = "#111827"; ctx.lineWidth = 0.5;
+      for (let i = 1; i <= 4; i++) {
+        ctx.beginPath(); ctx.arc(CENTER, CY, RADIUS * i / 4, 0, Math.PI * 2);
+        ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.beginPath(); ctx.moveTo(CENTER, CY - RADIUS - 10); ctx.lineTo(CENTER, CY + RADIUS + 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(CENTER - RADIUS - 10, CY); ctx.lineTo(CENTER + RADIUS + 10, CY); ctx.stroke();
+      const d = RADIUS + 10;
+      ctx.beginPath(); ctx.moveTo(CENTER - d * 0.707, CY - d * 0.707); ctx.lineTo(CENTER + d * 0.707, CY + d * 0.707); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(CENTER + d * 0.707, CY - d * 0.707); ctx.lineTo(CENTER - d * 0.707, CY + d * 0.707); ctx.stroke();
+
+      ctx.fillStyle = "#4d5568"; ctx.font = `${11 * scale}px monospace`; ctx.textAlign = "center";
+      ctx.fillText("90°", CENTER, CY - RADIUS - 14);
+      ctx.fillText("-90°", CENTER, CY + RADIUS + 20);
+      ctx.textAlign = "left"; ctx.fillText("0°", CENTER + RADIUS + 8, CY + 4);
+      ctx.textAlign = "right"; ctx.fillText("180°", CENTER - RADIUS - 8, CY + 4);
     }
 
     const towerResults = result?.towers || [];
     const userResults = result?.users || [];
 
-    // draw coverage circles
-    towerResults.forEach((t: any, i: number) => {
-      ctx.beginPath();
-      ctx.arc(t.position.x, t.position.y, t.coverage_radius * SCALE, 0, Math.PI * 2);
-      ctx.strokeStyle = TOWER_COLORS[i] + "40";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = TOWER_COLORS[i] + "08";
-      ctx.fill();
-    });
-
-    // draw connectivity beams — one cone per connection (multi-user fix)
-    towerResults.forEach((t: any, i: number) => {
-      const conns: any[] = t.connections || [];
-      conns.forEach((conn: any, connIdx: number) => {
-        const u = userResults[conn.user_id];
-        if (!u) return;
-        const alpha = Math.max(0.15, conn.signal_strength / 100);
-        const dx = u.position.x - t.position.x;
-        const dy = u.position.y - t.position.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const angle = Math.atan2(dy, dx);
-        // Slightly offset spread per connection so two cones are visually distinct
-        const spread = 0.12 + connIdx * 0.04;
-        const userColor = USER_COLORS[conn.user_id] || TOWER_COLORS[i];
-
-        // filled cone
-        ctx.beginPath();
-        ctx.moveTo(t.position.x, t.position.y);
-        ctx.lineTo(
-          t.position.x + dist * Math.cos(angle - spread),
-          t.position.y + dist * Math.sin(angle - spread)
-        );
-        ctx.lineTo(
-          t.position.x + dist * Math.cos(angle + spread),
-          t.position.y + dist * Math.sin(angle + spread)
-        );
-        ctx.closePath();
-        // blend tower color with user color
-        ctx.fillStyle = TOWER_COLORS[i] + Math.round(alpha * 35).toString(16).padStart(2, "0");
-        ctx.fill();
-
-        // center line tinted with user color
-        ctx.beginPath();
-        ctx.moveTo(t.position.x, t.position.y);
-        ctx.lineTo(u.position.x, u.position.y);
-        ctx.strokeStyle = userColor + Math.round(alpha * 200).toString(16).padStart(2, "0");
-        ctx.lineWidth = 2;
-        ctx.stroke();
+    // ── Coverage circles ──
+    if (viz.coverage) {
+      towerResults.forEach((t: any, i: number) => {
+        const tx = sx(t.position.x), ty = sy(t.position.y);
+        const maxR = t.coverage_radius * scale;
+        ctx.beginPath(); ctx.arc(tx, ty, maxR, 0, Math.PI * 2);
+        ctx.strokeStyle = TOWER_COLORS[i] + "20"; ctx.lineWidth = 1;
+        ctx.setLineDash([6, 6]); ctx.stroke(); ctx.setLineDash([]);
       });
+    }
+
+    // ── Beam patterns ──
+    if (viz.beams) {
+      towerResults.forEach((t: any, i: number) => {
+        const tx = sx(t.position.x), ty = sy(t.position.y);
+        const maxR = t.coverage_radius * scale;
+        const beams: any[] = t.user_beams || [];
+        const beamsToDraw = beams.length > 0 ? beams : [{ beam_profile: t.beam_profile, steering_angle: 0 }];
+
+        beamsToDraw.forEach((beam: any) => {
+          const profile = beam.beam_profile;
+          if (!profile?.angles || !profile?.magnitudes_db) return;
+          const angles = profile.angles as number[];
+          const magsDb = profile.magnitudes_db as number[];
+          const uid = beam.user_id;
+          let canvasDir: number;
+          if (uid !== undefined && userResults[uid]) {
+            const u = userResults[uid];
+            canvasDir = Math.atan2(sy(u.position.y) - ty, sx(u.position.x) - tx);
+          } else {
+            canvasDir = -Math.PI / 2;
+          }
+          const peakRad = (beam.steering_angle || 0) * Math.PI / 180;
+          const rotOff = canvasDir - peakRad;
+
+          // Convert dB to linear amplitude for smooth lobes
+          const amps = magsDb.map((db: number) => {
+            const clamped = Math.max(-40, Math.min(0, db));
+            return Math.pow(10, clamped / 20);
+          });
+
+          // Front half: -90° to +90° rotated by rotOff
+          ctx.beginPath();
+          for (let j = 0; j < angles.length; j++) {
+            const amp = amps[j];
+            const r = viz.sidelobes ? amp * maxR : (amp > 0.5 ? amp * maxR : amp * maxR * 0.1);
+            const ca = angles[j] * Math.PI / 180 + rotOff;
+            const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
+            j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          // Mirror: back half (reflected, attenuated)
+          for (let j = angles.length - 1; j >= 0; j--) {
+            const r = amps[j] * maxR * 0.08;
+            const ca = angles[j] * Math.PI / 180 + rotOff + Math.PI;
+            const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
+            ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          const grad = ctx.createRadialGradient(tx, ty, 0, tx, ty, maxR);
+          grad.addColorStop(0, TOWER_COLORS[i] + "30");
+          grad.addColorStop(0.5, TOWER_COLORS[i] + "18");
+          grad.addColorStop(1, TOWER_COLORS[i] + "05");
+          ctx.fillStyle = grad; ctx.fill();
+          ctx.strokeStyle = TOWER_COLORS[i] + "55"; ctx.lineWidth = 1; ctx.stroke();
+        });
+      });
+    }
+
+    // ── Draw obstacles (buildings) ──
+    obstacles.forEach((obs, i) => {
+      const ox = sx(obs.x), oy = sy(obs.y);
+      const ow = obs.width * scale, oh = obs.height * scale;
+
+      // Building body
+      ctx.fillStyle = "#64748b44";
+      ctx.fillRect(ox - ow / 2, oy - oh / 2, ow, oh);
+      ctx.strokeStyle = "#94a3b888";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(ox - ow / 2, oy - oh / 2, ow, oh);
+
+      // Building icon (grid lines)
+      ctx.strokeStyle = "#94a3b844";
+      ctx.lineWidth = 0.5;
+      for (let r = 1; r < 3; r++) {
+        const ry = oy - oh / 2 + (r / 3) * oh;
+        ctx.beginPath(); ctx.moveTo(ox - ow / 2, ry); ctx.lineTo(ox + ow / 2, ry); ctx.stroke();
+      }
+      for (let c = 1; c < 3; c++) {
+        const cx2 = ox - ow / 2 + (c / 3) * ow;
+        ctx.beginPath(); ctx.moveTo(cx2, oy - oh / 2); ctx.lineTo(cx2, oy + oh / 2); ctx.stroke();
+      }
+
+      // Label
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = `bold ${9 * scale}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(`B${i + 1}`, ox, oy + 3 * scale);
     });
 
-    // draw towers
+    // ── Connection lines (LOS + NLOS paths) ──
+    if (viz.connections) {
+      towerResults.forEach((t: any, i: number) => {
+        (t.connections || []).forEach((conn: any) => {
+          const u = userResults[conn.user_id];
+          if (!u) return;
+          const tpx = sx(t.position.x), tpy = sy(t.position.y);
+          const upx = sx(u.position.x), upy = sy(u.position.y);
+          const paths: any[] = conn.paths || [];
+
+          if (paths.length === 0) {
+            // Fallback: simple direct line
+            ctx.beginPath();
+            ctx.moveTo(tpx, tpy); ctx.lineTo(upx, upy);
+            ctx.strokeStyle = USER_COLORS[conn.user_id] + "88";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          paths.forEach((p: any) => {
+            const isLOS = p.type === "LOS";
+            const color = isLOS ? "#22c55e" : "#f59e0b";
+
+            ctx.save();
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 6;
+
+            if (isLOS) {
+              // Solid line: tower → user
+              ctx.beginPath();
+              ctx.moveTo(tpx, tpy); ctx.lineTo(upx, upy);
+              ctx.strokeStyle = color + "cc";
+              ctx.lineWidth = 2;
+              ctx.setLineDash([]);
+              ctx.stroke();
+            } else if (p.via) {
+              // Dashed line: tower → bounce → user
+              const vx = sx(p.via.x), vy = sy(p.via.y);
+              ctx.beginPath();
+              ctx.moveTo(tpx, tpy); ctx.lineTo(vx, vy); ctx.lineTo(upx, upy);
+              ctx.strokeStyle = color + "cc";
+              ctx.lineWidth = 1.5;
+              ctx.setLineDash([6, 4]);
+              ctx.stroke();
+              ctx.setLineDash([]);
+
+              // Bounce point diamond
+              ctx.fillStyle = color;
+              ctx.beginPath();
+              ctx.moveTo(vx, vy - 5 * scale);
+              ctx.lineTo(vx + 5 * scale, vy);
+              ctx.lineTo(vx, vy + 5 * scale);
+              ctx.lineTo(vx - 5 * scale, vy);
+              ctx.closePath();
+              ctx.fill();
+            }
+            ctx.restore();
+          });
+
+          // Signal label at midpoint
+          const mx = (tpx + upx) / 2, my = (tpy + upy) / 2;
+          const pathType = conn.los_blocked ? "NLOS" : "LOS";
+          ctx.fillStyle = "#e2e5ed";
+          ctx.font = `${9 * scale}px monospace`;
+          ctx.textAlign = "center";
+          ctx.fillText(`${conn.distance} m (${pathType})`, mx, my - 6 * scale);
+          ctx.fillStyle = conn.signal_dbm > -60 ? "#22c55e" : conn.signal_dbm > -90 ? "#f59e0b" : "#ef4444";
+          ctx.fillText(`${conn.signal_dbm} dBm`, mx, my + 6 * scale);
+        });
+      });
+    }
+
+    // ── Draw towers (triangles) ──
     towerResults.forEach((t: any, i: number) => {
-      const isDragging = draggingTowerRef.current === i;
-      // glow for dragging
-      if (isDragging) {
-        ctx.shadowColor = TOWER_COLORS[i];
-        ctx.shadowBlur = 16;
-      }
+      const isDrag = draggingTowerRef.current === i;
+      const tpx = sx(t.position.x), tpy = sy(t.position.y);
+      if (isDrag) { ctx.shadowColor = TOWER_COLORS[i]; ctx.shadowBlur = 20; }
+
       ctx.fillStyle = TOWER_COLORS[i];
       ctx.beginPath();
-      ctx.moveTo(t.position.x, t.position.y - 18);
-      ctx.lineTo(t.position.x - 10, t.position.y + 10);
-      ctx.lineTo(t.position.x + 10, t.position.y + 10);
+      ctx.moveTo(tpx, tpy - 18 * scale);
+      ctx.lineTo(tpx - 12 * scale, tpy + 10 * scale);
+      ctx.lineTo(tpx + 12 * scale, tpy + 10 * scale);
       ctx.closePath();
       ctx.fill();
       ctx.shadowBlur = 0;
 
-      // drag handle ring
-      ctx.beginPath();
-      ctx.arc(t.position.x, t.position.y - 4, 14, 0, Math.PI * 2);
-      ctx.strokeStyle = TOWER_COLORS[i] + (isDragging ? "cc" : "44");
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(tpx, tpy - 4 * scale, 16 * scale, 0, Math.PI * 2);
+      ctx.strokeStyle = TOWER_COLORS[i] + (isDrag ? "cc" : "44");
+      ctx.lineWidth = 1.5; ctx.stroke();
 
-      ctx.fillStyle = "#e4e6ef";
-      ctx.font = "bold 11px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(`T${i + 1}`, t.position.x, t.position.y + 24);
+      ctx.fillStyle = "#e4e6ef"; ctx.font = `bold ${12 * scale}px monospace`; ctx.textAlign = "center";
+      ctx.fillText(`T${i + 1}`, tpx, tpy + 26 * scale);
     });
 
-    // draw users
+    // ── Draw users (circles) ──
     users.forEach((u, i) => {
-      const isActive = i === activeUser;
-      ctx.beginPath();
-      ctx.arc(u.x, u.y, isActive ? 12 : 10, 0, Math.PI * 2);
-      ctx.fillStyle = USER_COLORS[i] + (isActive ? "cc" : "88");
-      ctx.fill();
-      if (isActive) {
-        ctx.strokeStyle = USER_COLORS[i];
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 10px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`U${i + 1}`, u.x, u.y);
+      const upx = sx(u.x), upy = sy(u.y);
+      ctx.beginPath(); ctx.arc(upx, upy, 12 * scale, 0, Math.PI * 2);
+      ctx.fillStyle = USER_COLORS[i] + "cc"; ctx.fill();
+      ctx.strokeStyle = USER_COLORS[i]; ctx.lineWidth = 2; ctx.stroke();
+
+      ctx.beginPath(); ctx.arc(upx, upy, 18 * scale, 0, Math.PI * 2);
+      ctx.strokeStyle = USER_COLORS[i] + "33"; ctx.lineWidth = 1; ctx.stroke();
+
+      ctx.fillStyle = "#fff"; ctx.font = `bold ${10 * scale}px monospace`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(`U${i + 1}`, upx, upy);
       ctx.textBaseline = "alphabetic";
     });
 
-  }, [result, users, activeUser]);
+  }, [result, users, obstacles, viz]);
 
   const updateTowerParam = (i: number, key: string, value: number) => {
     setTowers(prev => prev.map((t, idx) => idx === i ? { ...t, [key]: value } : t));
   };
 
+  const resetAll = () => {
+    setTowers(DEFAULT_TOWERS);
+    setUsers(DEFAULT_USERS);
+    setObstacles(DEFAULT_OBSTACLES);
+    setGlobalSnr(250);
+    setGlobalWindow("kaiser");
+    setGlobalBeta(6.0);
+    setAddObstacleMode(false);
+    setTimeout(() => runSim(DEFAULT_TOWERS, DEFAULT_USERS, DEFAULT_OBSTACLES), 50);
+  };
+
   return (
-    <div className="mx-auto max-w-screen-2xl p-4">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold text-text-primary">5G Simulator</h1>
-        <p className="text-sm text-text-secondary">
-          3 towers, 2 users — drag towers/users on canvas | Arrow Keys (U1) / WASD (U2) / Tab to switch
-        </p>
+    <div className="flex flex-col" style={{ height: "calc(100vh - 44px)", overflow: "hidden" }}>
+      {/* Top bar with SNR */}
+      <div className="flex items-center justify-end px-5 py-1.5" style={{ borderBottom: "1px solid #1a1f2e" }}>
+        <div className="snr-control">
+          <label>SNR</label>
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-green" />
+          <input type="range" min={0} max={1000} step={10} value={globalSnr}
+            onChange={e => setGlobalSnr(Number(e.target.value))} />
+          <span className="snr-value">{globalSnr}</span>
+        </div>
+        <button className="ml-3 text-text-muted hover:text-text-secondary text-sm">⚙</button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
-        {/* Canvas */}
-        <div className="rounded-lg border border-border bg-bg-surface p-4">
-          <canvas
-            ref={canvasRef}
-            className="w-full rounded border border-border cursor-grab active:cursor-grabbing"
-            style={{ maxHeight: 600, aspectRatio: `${CANVAS_W}/${CANVAS_H}` }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          />
-          <div className="mt-3 flex gap-4 text-xs text-text-muted">
+      {/* Main content */}
+      <div className="flex-1 flex gap-0 overflow-hidden">
+        {/* Polar Canvas Area */}
+        <div className="flex-1 flex items-center justify-center relative" style={{ minWidth: 0, overflow: "hidden" }}>
+          <div className="relative" style={{ width: "100%", height: "100%" }}>
+            <SignalLegend />
+            <VizCheckboxes viz={viz} setViz={setViz} />
+            <canvas
+              ref={canvasRef}
+              className={`rounded-xl w-full h-full ${addObstacleMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
+              style={{ border: addObstacleMode ? "1px solid #f59e0b66" : "1px solid #1a1f2e" }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onContextMenu={handleContextMenu}
+            />
+            {/* Bottom canvas controls */}
+            <div className="absolute bottom-3 right-3 flex items-center gap-2" style={{ zIndex: 10 }}>
+              <button
+                className={`rounded-md border px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
+                  addObstacleMode
+                    ? 'border-amber-500 bg-amber-500/20 text-amber-300'
+                    : 'border-border bg-bg-surface/90 backdrop-blur-sm text-text-muted hover:text-text-primary'
+                }`}
+                onClick={() => setAddObstacleMode(!addObstacleMode)}
+              >
+                <span>🏢</span> {addObstacleMode ? 'Click to place…' : `Add Obstacle (${obstacles.length}/5)`}
+              </button>
+              <button className="rounded-md border border-border bg-bg-surface/90 backdrop-blur-sm px-2.5 py-1 text-[10px] text-text-muted hover:text-text-primary flex items-center gap-1">
+                <span>⊞</span> Array Factor (dB)
+              </button>
+            </div>
+          </div>
+          {/* Keyboard hint */}
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex gap-4 text-[10px] text-text-muted" style={{ zIndex: 10 }}>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-3 w-3 rounded-full" style={{ background: USER_COLORS[0] }} />
-              User 1 (Arrows){activeUser === 0 && " ← active"}
+              <span className="font-bold" style={{ color: USER_COLORS[0] }}>N</span> User 1: Arrows
             </span>
             <span className="flex items-center gap-1">
-              <span className="inline-block h-3 w-3 rounded-full" style={{ background: USER_COLORS[1] }} />
-              User 2 (WASD){activeUser === 1 && " ← active"}
+              <span className="inline-block h-2 w-2 rounded-full" style={{ background: USER_COLORS[1] }} />
+              User 2: WASD
             </span>
-            <span className="ml-auto">Tab = switch · Drag towers/users</span>
+            <span className="flex items-center gap-1">
+              <span className="text-amber-400">🏢</span> Right-click to remove
+            </span>
           </div>
         </div>
 
-        {/* Tower Parameter Cards */}
-        <div className="flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: "calc(100vh - 120px)" }}>
-          {loading && (
-            <span className="text-xs text-accent-green animate-pulse">Updating…</span>
-          )}
-
-          {towers.map((tower, i) => {
-            const tResult = (result?.towers || [])[i];
-            const conns: any[] = tResult?.connections || [];
-            return (
-              <div
-                key={i}
-                className="rounded-lg border bg-bg-surface p-4 transition-colors"
-                style={{ borderColor: TOWER_COLORS[i] + "66" }}
-              >
-                <div className="mb-3 flex items-center gap-2">
-                  <span
-                    className="inline-block h-3 w-3 rounded-sm"
-                    style={{ background: TOWER_COLORS[i] }}
-                  />
-                  <h3 className="text-sm font-semibold text-text-primary">
-                    Tower {i + 1}
-                  </h3>
-                  {conns.length > 0 && (
-                    <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                      style={{ background: TOWER_COLORS[i] + "22", color: TOWER_COLORS[i] }}>
-                      {conns.length} user{conns.length > 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
-
-                {/* Editable sliders */}
-                <div className="space-y-2">
-                  <TowerSlider
-                    label="Elements" value={tower.num_elements}
-                    min={4} max={128} step={4}
-                    onChange={(v) => updateTowerParam(i, "num_elements", v)}
-                  />
-                  <TowerSlider
-                    label="Coverage (m)" value={tower.coverage_radius}
-                    min={100} max={1000} step={50}
-                    onChange={(v) => updateTowerParam(i, "coverage_radius", v)}
-                  />
-                  <TowerSlider
-                    label="Frequency" value={tower.frequency}
-                    min={1e9} max={100e9} step={1e9} unit="Hz"
-                    onChange={(v) => updateTowerParam(i, "frequency", v)}
-                  />
-                  <TowerSlider
-                    label="SNR" value={tower.snr}
-                    min={0} max={500} step={10}
-                    onChange={(v) => updateTowerParam(i, "snr", v)}
-                  />
-                </div>
-
-                {/* Position info */}
-                <div className="mt-2 flex gap-3 text-[10px] text-text-muted border-t border-border pt-2">
-                  <span>x: {Math.round(tower.position.x)}</span>
-                  <span>y: {Math.round(tower.position.y)}</span>
-                  {tResult?.parameters?.steering_angle !== undefined && (
-                    <span className="ml-auto">steer: {tResult.parameters.steering_angle.toFixed(1)}°</span>
-                  )}
-                </div>
-
-                {conns.length > 0 && (
-                  <div className="mt-2 border-t border-border pt-2">
-                    {conns.map((c: any) => (
-                      <div key={c.user_id} className="flex justify-between text-xs">
-                        <span style={{ color: USER_COLORS[c.user_id] }}>
-                          User {c.user_id + 1}
-                        </span>
-                        <span className="font-mono text-text-primary">
-                          {c.distance}m | {c.signal_strength}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* User Signal Summary */}
-          {result?.users?.map((u: any, i: number) => (
-            <div key={i} className="rounded-lg border border-border bg-bg-surface p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="inline-block h-3 w-3 rounded-full" style={{ background: USER_COLORS[i] }} />
-                <span className="text-sm font-semibold text-text-primary">User {i + 1}</span>
-              </div>
-              <div className="text-xs text-text-secondary">
-                <p>Connected to: {u.connected_towers.length > 0 ? u.connected_towers.map((t: number) => `T${t + 1}`).join(", ") : "No towers"}</p>
-                {Object.entries(u.signal_strengths || {}).map(([tid, str]) => (
-                  <div key={tid} className="flex justify-between mt-1">
-                    <span>Tower {Number(tid) + 1}</span>
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-20 rounded-full bg-bg-elevated overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${str}%`,
-                            background: TOWER_COLORS[Number(tid)],
-                          }}
-                        />
-                      </div>
-                      <span className="font-mono text-text-primary w-8 text-right">{String(str)}%</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+        {/* Right Panel */}
+        <div className="flex-shrink-0 flex flex-col border-l border-border overflow-y-auto overflow-x-hidden" style={{ background: "#0a0e17", width: 420, minWidth: 420, maxWidth: 420 }}>
+          {/* TOWERS */}
+          <div className="p-3">
+            <h2 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">TOWERS</h2>
+            <div className="space-y-3">
+              {towers.map((tower, i) => (
+                <TowerCard key={i} tower={tower} tResult={(result?.towers || [])[i]}
+                  index={i} updateParam={updateTowerParam} />
+              ))}
             </div>
-          ))}
+          </div>
+
+          {/* USERS */}
+          <div className="p-3 border-t border-border">
+            <h2 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-3">USERS</h2>
+            <div className="space-y-3">
+              {(result?.users || []).map((u: any, i: number) => (
+                <UserCard key={i} user={u} index={i} towers={result?.towers || []} />
+              ))}
+            </div>
+          </div>
         </div>
+      </div>
+
+      {/* Global Parameters Bar */}
+      <div className="global-param-bar">
+        <div className="param-item">
+          <span className="param-label">Elements</span>
+          <span className="param-value">{towers[0]?.num_elements || 32}</span>
+        </div>
+        <div className="param-item">
+          <span className="param-label">Spacing (λ)</span>
+          <span className="param-value">{towers[0]?.element_spacing || 0.5}</span>
+        </div>
+        <div className="param-item">
+          <span className="param-label">Frequency</span>
+          <span className="param-value">{((towers[0]?.frequency || 28e9) / 1e9).toFixed(1)} GHz</span>
+        </div>
+        <div className="param-item">
+          <span className="param-label">SNR</span>
+          <span className="param-value">{globalSnr}</span>
+        </div>
+        <div className="param-item">
+          <span className="param-label">Window</span>
+          <select value={globalWindow} onChange={e => setGlobalWindow(e.target.value)}>
+            <option value="kaiser">Kaiser (β)</option>
+            <option value="hamming">Hamming</option>
+            <option value="hanning">Hanning</option>
+            <option value="blackman">Blackman</option>
+            <option value="rectangular">Rectangular</option>
+          </select>
+        </div>
+        <div className="param-item">
+          <span className="param-label">β</span>
+          <span className="param-value">{globalBeta.toFixed(1)}</span>
+          <input type="range" min={0} max={20} step={0.5} value={globalBeta}
+            onChange={e => setGlobalBeta(Number(e.target.value))} />
+        </div>
+        <button onClick={resetAll}>Reset All</button>
       </div>
     </div>
   );
