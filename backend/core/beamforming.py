@@ -121,16 +121,36 @@ class BeamformingSimulator:
         so that positive values represent constructive interference and
         negative values represent destructive interference.
         """
-        # Scale spatial range to ~30 wavelengths so fringes are visible
-        half_x = max(self.wavelength * 15, self.d * self.num_elements * 2)
-        y_max = max(self.wavelength * 15, half_x)
+        # ── Grid extent ──────────────────────────────────────────────────
+        # Use a FIXED reference wavelength (at 1 GHz for the current medium)
+        # so the grid does NOT rescale when frequency changes.  This makes
+        # frequency changes visible as changes in fringe density.
+        ref_wavelength = self.medium_speed / 1e9          # e.g. 0.3 m for EM
+        ref_d = self.element_spacing * ref_wavelength
+        ref_aperture = ref_d * self.num_elements
+        # Current aperture (may differ if freq ≠ 1 GHz)
+        cur_aperture = self.d * self.num_elements
+        # Grid must be large enough for the reference aperture AND
+        # at least 10 current wavelengths so fringes are always resolved.
+        half_x = max(ref_aperture * 3,
+                     cur_aperture * 3,
+                     self.wavelength * 10)
+        half_x = np.clip(half_x, 0.01, 200.0)
+        y_max = half_x
 
         x = np.linspace(-half_x, half_x, resolution)
-        y = np.linspace(0.01 * self.wavelength, y_max, resolution)
+        y = np.linspace(half_x * 0.001, y_max, resolution)
         X, Y = np.meshgrid(x, y)
 
-        # element positions along x-axis centred at origin
+         # element positions along x-axis centred at origin
         elem_x = (np.arange(self.num_elements) - (self.num_elements - 1) / 2.0) * self.d
+
+        # Excitation phase per element for steering:
+        # The array factor (far-field/receiving) uses -n*k*d*sin(θ₀),
+        # but for outgoing spherical waves exp(+jkr) the sign flips:
+        # we need +n*k*d*sin(θ₀) to steer the radiated field to +θ₀.
+        n_indices = np.arange(self.num_elements)
+        excitation_phases = self.k * self.d * n_indices * np.sin(self.steering_angle_rad)
 
         # complex field at every point
         field = np.zeros_like(X, dtype=complex)
@@ -138,23 +158,39 @@ class BeamformingSimulator:
             dx = X - ex
             dy = Y
             r = np.sqrt(dx**2 + dy**2) + 1e-30
-            # steering phase for each element
-            steer_phase = self.k * ex * np.sin(self.steering_angle_rad)
-            field += self.weights[i] * np.exp(1j * (self.k * r + steer_phase + self.phase_offset)) / np.sqrt(r)
+            # Progressive phase offset per element – negated for outgoing
+            # wave convention (same sign flip as steering)
+            elem_phase_offset = -i * self.phase_offset
+            # Point source with applied excitation phase for steering
+            field += self.weights[i] * np.exp(1j * (self.k * r + excitation_phases[i] + elem_phase_offset)) / np.sqrt(r)
 
-        # Take the real part to show the oscillating wave pattern
-        real_field = np.real(field)
+        # Apply signal type modulation
+        if self.signal_type == SignalType.COSINE:
+            # cosine → 90° phase-shifted version of the wave
+            modulated = -np.imag(field)
+        elif self.signal_type == SignalType.PULSE:
+            # pulse → use amplitude envelope (magnitude)
+            modulated = np.abs(field)
+        else:
+            # sine (default) → real part of the field (standard convention)
+            modulated = np.real(field)
 
         # Normalise to [-1, 1]
-        peak = np.max(np.abs(real_field)) + 1e-30
-        real_field /= peak
+        peak = np.max(np.abs(modulated)) + 1e-30
+        modulated /= peak
 
-        # apply noise
-        real_field = add_noise_2d(real_field, self.snr)
-        real_field = np.clip(real_field, -1, 1)
+        # apply noise – use log-scaled SNR so mid-range slider values
+        # produce visible noise (raw SNR 0-1000 → effective 0-60 dB)
+        effective_snr = self.snr  # default pass-through
+        if self.snr < 1000:
+            # Map slider 0-1000 → effective SNR 0-1000 with more visible
+            # noise at mid-range: use quadratic curve so SNR=500→125
+            effective_snr = (self.snr / 1000.0) ** 2 * 1000.0
+        modulated = add_noise_2d(modulated, effective_snr)
+        modulated = np.clip(modulated, -1, 1)
 
         return {
-            "map": real_field.tolist(),
+            "map": modulated.tolist(),
             "x": x.tolist(),
             "y": y.tolist(),
             "x_range": [-half_x, half_x],
