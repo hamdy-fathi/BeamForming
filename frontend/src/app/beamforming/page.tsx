@@ -8,23 +8,33 @@ import {
   type BeamformingParams,
 } from "@/lib/api";
 
+/* ── Collapsible Section ─────────────────────────────────────────────── */
+function Section({ icon, title, color, children, defaultOpen = true }: {
+  icon: string; title: string; color: string; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`section-header w-full ${open ? 'open' : ''}`}
+        style={{ color }}
+      >
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider flex-1 text-left">{title}</span>
+        <span className="chevron">▶</span>
+      </button>
+      <div className={`section-collapse ${open ? '' : 'collapsed'}`}>
+        <div className="flex flex-col gap-3 pt-1 pb-2">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Slider component ───────────────────────────────────────────────── */
-function Slider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  unit,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  unit?: string;
-  onChange: (v: number) => void;
+function Slider({ label, value, min, max, step, unit, onChange }: {
+  label: string; value: number; min: number; max: number; step: number;
+  unit?: string; onChange: (v: number) => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -39,15 +49,8 @@ function Slider({
           {unit ? ` ${unit}` : ""}
         </span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full"
-      />
+      <input type="range" min={min} max={max} step={step} value={value}
+        onChange={(e) => onChange(Number(e.target.value))} className="w-full" />
     </div>
   );
 }
@@ -112,26 +115,23 @@ export default function BeamformingPage() {
     const totalW = cssW;
     const totalH = cssH;
 
-    ctx.fillStyle = "#1a1d27";
+    ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, totalW, totalH);
 
     // Dark-centered diverging colormap: deep blue → dark → deep red
-    // Maps value in [-1, 1] to colour; zero → near-black (fits dark theme)
     const coolwarmMap = (v: number): [number, number, number] => {
       v = Math.max(-1, Math.min(1, v));
       let r: number, g: number, b: number;
       if (v < 0) {
-        // Negative: dark → deep blue  (v: 0 → -1)
-        const s = -v; // 0 → 1
-        r = Math.round(22 * (1 - s));              // 22 → 0
-        g = Math.round(24 + s * 56);               // 24 → 80
-        b = Math.round(30 + s * 195);              // 30 → 225
+        const s = -v;
+        r = Math.round(22 * (1 - s));
+        g = Math.round(24 + s * 56);
+        b = Math.round(30 + s * 195);
       } else {
-        // Positive: dark → deep red  (v: 0 → 1)
-        const s = v;  // 0 → 1
-        r = Math.round(22 + s * 213);              // 22 → 235
-        g = Math.round(24 + s * 26);               // 24 → 50
-        b = Math.round(30 * (1 - s));              // 30 → 0
+        const s = v;
+        r = Math.round(22 + s * 213);
+        g = Math.round(24 + s * 26);
+        b = Math.round(30 * (1 - s));
       }
       return [r, g, b];
     };
@@ -178,8 +178,8 @@ export default function BeamformingPage() {
     };
 
     // Draw axis tick marks and labels
-    ctx.fillStyle = "#b0b8cc";
-    ctx.strokeStyle = "#555a6e";
+    ctx.fillStyle = "#8892a6";
+    ctx.strokeStyle = "#1e2433";
     ctx.lineWidth = 1;
     ctx.font = "11px 'Inter', sans-serif";
 
@@ -239,26 +239,29 @@ export default function BeamformingPage() {
       const py = margin.top + plotH; // bottom of plot
 
       ctx.beginPath();
-      ctx.arc(px, py, 4, 0, Math.PI * 2);
-      ctx.fillStyle = "#2563eb";
+      ctx.arc(px, py, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#06b6d4";
       ctx.fill();
-      ctx.strokeStyle = "#1e40af";
-      ctx.lineWidth = 1;
+      ctx.shadowColor = "#06b6d4";
+      ctx.shadowBlur = 8;
+      ctx.strokeStyle = "#0e7490";
+      ctx.lineWidth = 1.5;
       ctx.stroke();
+      ctx.shadowBlur = 0;
     }
 
     // Transmitter legend
-    ctx.fillStyle = "#2563eb";
+    ctx.fillStyle = "#06b6d4";
     ctx.beginPath();
     ctx.arc(margin.left + plotW - 90, margin.top + 16, 4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#b0b8cc";
+    ctx.fillStyle = "#8892a6";
     ctx.font = "11px 'Inter', sans-serif";
     ctx.textAlign = "left";
     ctx.fillText("Transmitters", margin.left + plotW - 82, margin.top + 20);
 
     // Plot border
-    ctx.strokeStyle = "#555a6e";
+    ctx.strokeStyle = "#1e2433";
     ctx.lineWidth = 1;
     ctx.strokeRect(margin.left, margin.top, plotW, plotH);
   }, [result, params.steering_angle, params.num_elements, params.element_spacing, params.frequency, params.phase_offset, params.signal_type, params.snr, params.window_type, params.medium_speed, params.map_resolution]);
@@ -276,11 +279,11 @@ export default function BeamformingPage() {
     canvas.height = Math.round(H * dpr);
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = "#191c24";
+    ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, W, H);
 
     // grid lines
-    ctx.strokeStyle = "#2a2f3b";
+    ctx.strokeStyle = "#141922";
     ctx.lineWidth = 1;
     for (let db = 0; db >= -60; db -= 10) {
       const y = H - ((db + 60) / 60) * H;
@@ -288,7 +291,7 @@ export default function BeamformingPage() {
       ctx.moveTo(0, y);
       ctx.lineTo(W, y);
       ctx.stroke();
-      ctx.fillStyle = "#555968";
+      ctx.fillStyle = "#4d5568";
       ctx.font = "10px monospace";
       ctx.textAlign = "left";
       ctx.fillText(`${db} dB`, 4, y - 2);
@@ -297,16 +300,32 @@ export default function BeamformingPage() {
     // angle labels
     for (let a = -90; a <= 90; a += 30) {
       const x = ((a + 90) / 180) * W;
-      ctx.fillStyle = "#555a6e";
+      ctx.fillStyle = "#4d5568";
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       ctx.fillText(`${a}°`, x, H - 4);
     }
 
-    // beam curve
+    // area fill under curve
     ctx.beginPath();
-    ctx.strokeStyle = "#6ea8a0";
+    for (let i = 0; i < angles.length; i++) {
+      const x = ((angles[i] + 90) / 180) * W;
+      const y = H - ((magnitudes_db[i] + 60) / 60) * H;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.lineTo(((angles[angles.length-1] + 90) / 180) * W, H);
+    ctx.lineTo(((angles[0] + 90) / 180) * W, H);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(6, 182, 212, 0.08)";
+    ctx.fill();
+
+    // beam curve with glow
+    ctx.beginPath();
+    ctx.strokeStyle = "#06b6d4";
     ctx.lineWidth = 2;
+    ctx.shadowColor = "#06b6d4";
+    ctx.shadowBlur = 6;
     for (let i = 0; i < angles.length; i++) {
       const x = ((angles[i] + 90) / 180) * W;
       const y = H - ((magnitudes_db[i] + 60) / 60) * H;
@@ -314,10 +333,11 @@ export default function BeamformingPage() {
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
     // steering angle vertical indicator
     const steerX = ((params.steering_angle + 90) / 180) * W;
-    ctx.strokeStyle = "rgba(255, 220, 80, 0.7)";
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.7)";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
     ctx.beginPath();
@@ -327,7 +347,7 @@ export default function BeamformingPage() {
     ctx.setLineDash([]);
 
     // -3dB line
-    ctx.strokeStyle = "#c0635f";
+    ctx.strokeStyle = "#ef4444";
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     const y3db = H - ((-3 + 60) / 60) * H;
@@ -336,7 +356,7 @@ export default function BeamformingPage() {
     ctx.lineTo(W, y3db);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "#c0635f";
+    ctx.fillStyle = "#ef4444";
     ctx.font = "10px monospace";
     ctx.textAlign = "left";
     ctx.fillText("-3 dB", W - 42, y3db - 4);
@@ -357,7 +377,7 @@ export default function BeamformingPage() {
     const cx = W / 2, cy = H / 2;
     const maxR = W / 2 - 20;
 
-    ctx.fillStyle = "#191c24";
+    ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, W, H);
 
     // concentric dB rings at 0, -20, -40, -60
@@ -366,25 +386,24 @@ export default function BeamformingPage() {
       const r = ((db + 60) / 60) * maxR;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = "#2a2f3b";
+      ctx.strokeStyle = "#141922";
       ctx.lineWidth = 1;
       ctx.stroke();
-      // label
-      ctx.fillStyle = "#555968";
+      ctx.fillStyle = "#4d5568";
       ctx.font = "9px monospace";
       ctx.textAlign = "left";
       ctx.fillText(`${db}`, cx + r + 2, cy);
     });
 
     // cross hairs
-    ctx.strokeStyle = "#2a2f3b";
+    ctx.strokeStyle = "#141922";
     ctx.lineWidth = 0.5;
     ctx.beginPath(); ctx.moveTo(cx, cy - maxR - 10); ctx.lineTo(cx, cy + maxR + 10); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(cx - maxR - 10, cy); ctx.lineTo(cx + maxR + 10, cy); ctx.stroke();
 
-    // angle labels (0° top, 90° right, etc.)
+    // angle labels
     const labelAngles = [0, 30, 60, 90, -30, -60, -90];
-    ctx.fillStyle = "#6b7280";
+    ctx.fillStyle = "#4d5568";
     ctx.font = "9px monospace";
     labelAngles.forEach((a) => {
       const rad = (a - 90) * Math.PI / 180;
@@ -401,7 +420,6 @@ export default function BeamformingPage() {
       const angleDeg = angles[i];
       const db = Math.max(-60, magnitudes_db[i]);
       const r = ((db + 60) / 60) * maxR;
-      // angles: 0° = top, positive = right → convert to canvas angle
       const rad = (angleDeg - 90) * Math.PI / 180;
       const px = cx + r * Math.cos(rad);
       const py = cy + r * Math.sin(rad);
@@ -410,20 +428,23 @@ export default function BeamformingPage() {
     }
     ctx.closePath();
 
-    // gradient fill
+    // fill with green accent
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
-    grad.addColorStop(0, "rgba(110,168,160,0.55)");
-    grad.addColorStop(1, "rgba(110,168,160,0.05)");
+    grad.addColorStop(0, "rgba(34, 197, 94, 0.4)");
+    grad.addColorStop(1, "rgba(34, 197, 94, 0.03)");
     ctx.fillStyle = grad;
     ctx.fill();
 
-    ctx.strokeStyle = "#6ea8a0";
+    ctx.strokeStyle = "#22c55e";
     ctx.lineWidth = 1.5;
+    ctx.shadowColor = "#22c55e";
+    ctx.shadowBlur = 6;
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    // steering angle indicator line on polar
+    // steering angle indicator line
     const steerRad = (params.steering_angle - 90) * Math.PI / 180;
-    ctx.strokeStyle = "rgba(255, 220, 80, 0.85)";
+    ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([5, 4]);
     ctx.beginPath();
@@ -433,7 +454,7 @@ export default function BeamformingPage() {
     ctx.setLineDash([]);
 
     // title
-    ctx.fillStyle = "#555968";
+    ctx.fillStyle = "#4d5568";
     ctx.font = "10px monospace";
     ctx.textAlign = "left";
     ctx.fillText("Polar (dB)", 4, 12);
@@ -452,12 +473,14 @@ export default function BeamformingPage() {
     canvas.height = Math.round(H * dpr);
     ctx.scale(dpr, dpr);
 
-    ctx.fillStyle = "#191c24";
+    ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, W, H);
 
     ctx.beginPath();
-    ctx.strokeStyle = "#9480b3";
+    ctx.strokeStyle = "#a855f7";
     ctx.lineWidth = 2;
+    ctx.shadowColor = "#a855f7";
+    ctx.shadowBlur = 4;
     for (let i = 0; i < weights.length; i++) {
       const x = (i / (weights.length - 1)) * W;
       const y = H - weights[i] * H * 0.9 - 5;
@@ -465,8 +488,9 @@ export default function BeamformingPage() {
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
 
-    ctx.fillStyle = "#555968";
+    ctx.fillStyle = "#4d5568";
     ctx.font = "10px monospace";
     ctx.fillText("Window Shape", 4, 12);
   }, [result]);
@@ -486,25 +510,30 @@ export default function BeamformingPage() {
     params.medium_speed === 1540 ? "tissue" : "custom";
 
   return (
-    <div className="mx-auto max-w-screen-2xl p-4">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="mx-auto max-w-screen-2xl p-5">
+      <div className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Beamforming Core</h1>
-          <p className="text-sm text-text-secondary">
+          <h1 className="text-2xl font-bold text-text-primary tracking-tight">Beamforming Core</h1>
+          <p className="text-xs text-text-muted mt-0.5">
             Phased Array Interference &amp; Beam Profile
           </p>
         </div>
         {loading && (
-          <span className="text-xs text-accent-teal animate-pulse">Computing…</span>
+          <div className="status-chip" style={{ background: 'rgba(6,182,212,0.1)', border: '1px solid rgba(6,182,212,0.2)', color: '#06b6d4' }}>
+            <span className="dot" style={{ background: '#06b6d4' }} />
+            Computing…
+          </div>
         )}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
         {/* ── Parameter Panel ── */}
-        <div className="flex flex-col gap-4 rounded-lg border border-border bg-bg-surface p-4">
-          <h2 className="text-sm font-semibold text-text-primary uppercase tracking-wider">
+        <div className="glow-card glow-card-cyan flex flex-col gap-1 p-4">
+          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
             Parameters
           </h2>
+
+          <Section icon="📡" title="Array Configuration" color="#06b6d4">
 
           <Slider
             label="Number of Elements"
@@ -530,11 +559,27 @@ export default function BeamformingPage() {
             min={0} max={6.28} step={0.01} unit="rad"
             onChange={(v) => updateParam("phase_offset", v)}
           />
+          </Section>
+
+          <Section icon="📡" title="Signal & Medium" color="#3b82f6">
           <Slider
             label="Frequency"
             value={params.frequency}
             min={1e6} max={30e9} step={1e6} unit="Hz"
             onChange={(v) => updateParam("frequency", v)}
+          />
+          {/* Wavelength — computed from λ = c / f, inversely linked */}
+          <Slider
+            label="Wavelength (λ)"
+            value={params.medium_speed / params.frequency}
+            min={params.medium_speed / 30e9}
+            max={params.medium_speed / 1e6}
+            step={params.medium_speed / 30e9 / 10}
+            unit="m"
+            onChange={(lambda) => {
+              const newFreq = Math.round(params.medium_speed / lambda);
+              updateParam("frequency", Math.max(1e6, Math.min(30e9, newFreq)));
+            }}
           />
           <Slider
             label="SNR"
@@ -544,24 +589,23 @@ export default function BeamformingPage() {
           />
 
           {/* Medium Speed */}
-          <div className="flex flex-col gap-1 border-t border-border pt-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Medium / Application
-            </span>
-            <div className="flex gap-2 mt-1">
+          <div className="flex flex-col gap-2">
+            <div className="segment-control">
               <button
                 onClick={() => handleMediumPreset("em")}
-                className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${mediumPreset === "em" ? "bg-accent-teal/20 border border-accent-teal text-accent-teal" : "border border-border text-text-muted hover:text-text-primary"}`}
+                className={`segment-btn ${mediumPreset === "em" ? "active" : ""}`}
+                style={{ '--seg-color': '#06b6d4' } as any}
               >
                 EM Wave
-                <span className="block text-[10px] opacity-70">3×10⁸ m/s</span>
+                <span className="seg-sub">3×10⁸ m/s</span>
               </button>
               <button
                 onClick={() => handleMediumPreset("tissue")}
-                className={`flex-1 rounded px-2 py-1.5 text-xs font-medium transition-colors ${mediumPreset === "tissue" ? "bg-accent-red/20 border border-accent-red text-accent-red" : "border border-border text-text-muted hover:text-text-primary"}`}
+                className={`segment-btn ${mediumPreset === "tissue" ? "active" : ""}`}
+                style={{ '--seg-color': '#ef4444' } as any}
               >
                 Sound / Tissue
-                <span className="block text-[10px] opacity-70">1540 m/s</span>
+                <span className="seg-sub">1540 m/s</span>
               </button>
             </div>
             <Slider
@@ -578,25 +622,22 @@ export default function BeamformingPage() {
             <select
               value={params.signal_type}
               onChange={(e) => updateParam("signal_type", e.target.value)}
-              className="rounded border border-border bg-bg-elevated px-2 py-1.5 text-sm text-text-primary outline-none focus:border-border-focus"
+              className="rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary outline-none"
             >
               <option value="sine">Sine</option>
               <option value="cosine">Cosine</option>
               <option value="pulse">Pulse</option>
             </select>
           </div>
+          </Section>
 
-          {/* Window / Apodization */}
-          <div className="mt-2 border-t border-border pt-3">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-              Apodization
-            </h3>
+          <Section icon="🎯" title="Apodization" color="#a855f7">
             <div className="flex flex-col gap-1">
               <span className="text-xs text-text-secondary">Window Function</span>
               <select
                 value={params.window_type}
                 onChange={(e) => updateParam("window_type", e.target.value)}
-                className="rounded border border-border bg-bg-elevated px-2 py-1.5 text-sm text-text-primary outline-none focus:border-border-focus"
+                className="rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary outline-none"
               >
                 {windows.map((w: any) => (
                   <option key={w.type} value={w.type}>
@@ -616,95 +657,91 @@ export default function BeamformingPage() {
               </select>
             </div>
             {windows.find((w: any) => w.type === params.window_type) && (
-              <p className="mt-2 text-xs text-text-muted">
+              <p className="mt-1 text-[11px] text-text-muted leading-relaxed">
                 {windows.find((w: any) => w.type === params.window_type)?.description}
               </p>
             )}
-            {/* window shape canvas */}
             <canvas
               ref={windowCanvasRef}
-              className="mt-2 w-full rounded border border-border"
-              style={{ height: 100 }}
+              className="mt-1 w-full rounded-lg"
+              style={{ height: 80, border: '1px solid #1e2433' }}
             />
-          </div>
-
-          {/* Resolution */}
           <Slider
             label="Map Resolution"
             value={params.map_resolution}
             min={50} max={800} step={10}
             onChange={(v) => updateParam("map_resolution", v)}
           />
+          </Section>
         </div>
 
         {/* ── Visualisation Area ── */}
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-5">
           {/* Interference Map */}
-          <div className="rounded-lg border border-border bg-bg-surface p-4">
-            <h2 className="mb-3 text-sm font-semibold text-text-primary uppercase tracking-wider">
+          <div className="glow-card glow-card-amber p-4">
+            <h2 className="mb-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
               Constructive / Destructive Interference Map
             </h2>
             <div className="flex items-center gap-4">
               <canvas
                 ref={mapCanvasRef}
-                className="w-full rounded border border-border"
+                className="w-full rounded-lg"
                 style={{ height: 455 }}
               />
-              {/* Color bar */}
+              {/* Color bar — inferno */}
               <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] text-text-muted">1.00</span>
+                <span className="text-[10px] text-text-muted font-mono">1.00</span>
                 <div
-                  className="w-4 rounded"
+                  className="w-3.5 rounded-full"
                   style={{
-                    height: 200,
+                    height: 220,
                     background:
                       "linear-gradient(to bottom, rgb(235,50,0), rgb(130,35,15), rgb(22,24,30), rgb(10,50,120), rgb(0,80,225))",
                   }}
                 />
-                <span className="text-[10px] text-text-muted">-1.00</span>
-                <span className="text-[9px] text-text-muted mt-1 writing-mode-vertical" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: "0.5px" }}>
-                  Interference Intensity
+                <span className="text-[10px] text-text-muted font-mono">-1.00</span>
+                <span className="text-[9px] text-text-muted mt-1" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: "0.5px" }}>
+                  Intensity
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Beam Profiles — Cartesian + Polar side by side */}
-          <div className="rounded-lg border border-border bg-bg-surface p-4">
-            <h2 className="mb-3 text-sm font-semibold text-text-primary uppercase tracking-wider">
-              Beam Profile
-            </h2>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div className="flex-1">
-                <p className="mb-1 text-xs text-text-muted">Cartesian (dB)</p>
-                <canvas
-                  ref={profileCanvasRef}
-                  className="w-full rounded border border-border"
-                  style={{ height: 300 }}
-                />
-              </div>
-              <div className="flex-shrink-0">
-                <p className="mb-1 text-xs text-text-muted">Polar (rose)</p>
-                <canvas
-                  ref={polarCanvasRef}
-                  className="rounded border border-border"
-                  style={{ width: 340, height: 340 }}
-                />
-              </div>
+          {/* Beam Profiles */}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="glow-card glow-card-blue p-4">
+              <h2 className="mb-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                Beam Profile — Cartesian (dB)
+              </h2>
+              <canvas
+                ref={profileCanvasRef}
+                className="w-full rounded-lg"
+                style={{ height: 300 }}
+              />
+            </div>
+            <div className="glow-card glow-card-green p-4">
+              <h2 className="mb-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
+                Beam Profile — Polar
+              </h2>
+              <canvas
+                ref={polarCanvasRef}
+                className="w-full rounded-lg"
+                style={{ height: 300 }}
+              />
             </div>
           </div>
 
-          {/* Current Parameters Summary */}
+          {/* Active Parameters */}
           {result?.parameters && (
-            <div className="rounded-lg border border-border bg-bg-surface p-4">
-              <h2 className="mb-3 text-sm font-semibold text-text-primary uppercase tracking-wider">
+            <div className="glow-card glow-card-purple p-4">
+              <h2 className="mb-3 text-xs font-semibold text-text-secondary uppercase tracking-wider">
                 Active Parameters
               </h2>
-              <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                 {Object.entries(result.parameters).map(([k, v]) => (
-                  <div key={k} className="flex justify-between border-b border-border/50 py-1">
-                    <span className="text-text-muted">{k.replace(/_/g, " ")}</span>
-                    <span className="font-mono text-text-primary">
+                  <div key={k} className="stat-badge">
+                    <span className="stat-label">{k.replace(/_/g, " ")}</span>
+                    <span className="stat-value">
                       {typeof v === "number"
                         ? v >= 1e6
                           ? `${(v as number / 1e6).toFixed(2)}M`
