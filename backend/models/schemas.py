@@ -44,18 +44,32 @@ class Position(BaseModel):
 
 
 class TowerConfig(BaseModel):
-    position:         Position
-    num_elements:     int   = Field(32,    ge=2,   le=128)
-    frequency:        float = Field(28e9,  gt=0)
-    coverage_radius:  float = Field(500.0, gt=0)
-    element_spacing:  float = Field(0.5,   ge=0.1, le=2.0)
-    window_type:      WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr:              float = Field(200.0, ge=0,   le=1000)
+    position: Position
+    num_elements: int = Field(32, ge=2, le=128)
+    frequency: float = Field(28e9, gt=0)
+    coverage_radius: float = Field(500.0, gt=0)
+    element_spacing: float = Field(0.5, ge=0.1, le=2.0)
+    window_type: WindowTypeEnum = WindowTypeEnum.HAMMING
+    snr: float = Field(1000.0, ge=0, le=1000)
+    steering_angle: float = Field(0.0, ge=-90, le=90)
+    power_dbm: float = Field(30.0, ge=0, le=50)
+    kaiser_beta: float = Field(6.0, ge=0, le=20)
+
+
+class ObstacleConfig(BaseModel):
+    """A rectangular obstacle that blocks LOS and produces reflections."""
+    id: int = Field(ge=0)
+    x: float  # center x
+    y: float  # center y
+    width: float = Field(60.0, ge=20, le=200)
+    height: float = Field(60.0, ge=20, le=200)
+    reflection_loss_db: float = Field(6.0, ge=0, le=20)  # loss per bounce
 
 
 class FiveGRequest(BaseModel):
     towers: list[TowerConfig] = Field(..., min_length=3, max_length=3)
-    users:  list[Position]    = Field(..., min_length=1, max_length=2)
+    users: list[Position] = Field(..., min_length=1, max_length=2)
+    obstacles: list[ObstacleConfig] = Field(default_factory=list, max_length=5)
 
 
 class UserMoveRequest(BaseModel):
@@ -153,11 +167,36 @@ class RadarScanRequest(BaseModel):
 
 
 class RadarFullSweepRequest(BaseModel):
-    beam_width:     float = Field(10.0, ge=1,   le=90)
-    scan_speed:     float = Field(30.0, ge=1,   le=120)  # RPM
-    num_elements:   int   = Field(32,   ge=2,   le=128)
+    beam_width:      float = Field(10.0, ge=1,   le=90)
+    scan_speed:      float = Field(30.0, ge=1,   le=120)  # RPM
+    num_elements:    int   = Field(32,   ge=2,   le=128)
     element_spacing: float = Field(0.5, ge=0.1, le=2.0)
-    frequency:      float = Field(3e9,  gt=0)
-    window_type:    WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr:            float = Field(200.0, ge=0,  le=1000)
-    targets:        list[RadarTarget] = []
+    frequency:       float = Field(3e9,  gt=0)
+    window_type:     WindowTypeEnum = WindowTypeEnum.HAMMING
+    snr:             float = Field(200.0, ge=0,  le=1000)
+    detection_threshold: float = Field(12.0, ge=0, le=100)  # dB above noise
+    targets:         list[RadarTarget] = []
+
+
+class RadarDetection(BaseModel):
+    det_id: int
+    est_range: float
+    est_angle: float
+    signal_level: float
+    est_size: float
+    uncertainty_range: float
+    uncertainty_angle: float
+    uncertainty_size: float
+    num_hits: int
+
+
+class RadarFullSweepResponse(BaseModel):
+    beam_width: float
+    scan_speed_rpm: float
+    num_steps: int
+    scan_time_seconds: float
+    ppi_data: list[dict]
+    range_max: float
+    detections: list[RadarDetection]
+    ground_truth: list[RadarTarget]
+    matched: list[dict]

@@ -370,3 +370,214 @@ select:focus {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   5G REDESIGN — Visualization checkbox toggles
+   ═══════════════════════════════════════════════════════════════ */
+
+.viz-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  color: #8892a6;
+  transition: color 0.2s;
+}
+
+.viz-checkbox:hover {
+  color: #e2e5ed;
+}
+
+.viz-checkbox input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid #2d3548;
+  border-radius: 3px;
+  background: #0c1019;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.viz-checkbox input[type="checkbox"]:checked {
+  background: var(--check-color, #22c55e);
+  border-color: var(--check-color, #22c55e);
+}
+
+.viz-checkbox input[type="checkbox"]:checked::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #fff;
+  font-weight: bold;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL PARAM BAR
+   ═══════════════════════════════════════════════════════════════ */
+
+.global-param-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 8px 20px;
+  background: #0a0e17;
+  border-top: 1px solid #1a1f2e;
+  flex-wrap: wrap;
+}
+
+.global-param-bar .param-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.global-param-bar .param-label {
+  color: #4d5568;
+  font-size: 11px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.global-param-bar .param-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: #e2e5ed;
+  background: #141922;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid #1e2433;
+  min-width: 50px;
+  text-align: center;
+}
+
+.global-param-bar input[type="range"] {
+  width: 80px;
+  height: 3px;
+}
+
+.global-param-bar select {
+  font-size: 11px;
+  padding: 4px 24px 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #1e2433;
+  background-color: #141922;
+  color: #e2e5ed;
+}
+
+.global-param-bar button {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid #2d3548;
+  background: #141922;
+  color: #8892a6;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.global-param-bar button:hover {
+  color: #e2e5ed;
+  border-color: #4d5568;
+  background: #1e2433;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOWER BADGE (serving user indicators)
+   ═══════════════════════════════════════════════════════════════ */
+
+.serving-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MINI POLAR CANVAS
+   ═══════════════════════════════════════════════════════════════ */
+
+.mini-polar {
+  border-radius: 6px;
+  border: 1px solid #1e2433;
+  background: #080c14;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOWER PARAM ROW
+   ═══════════════════════════════════════════════════════════════ */
+
+.tower-param-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 2px 0;
+}
+
+.tower-param-row .tpr-label {
+  color: #4d5568;
+  min-width: 68px;
+  flex-shrink: 0;
+}
+
+.tower-param-row input[type="range"] {
+  flex: 1;
+  height: 3px;
+}
+
+.tower-param-row .tpr-value {
+  font-family: var(--font-mono, monospace);
+  color: #e2e5ed;
+  font-size: 11px;
+  min-width: 55px;
+  text-align: right;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SNR TOP CONTROL
+   ═══════════════════════════════════════════════════════════════ */
+
+.snr-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid #1e2433;
+  background: #0c1019;
+}
+
+.snr-control label {
+  font-size: 11px;
+  color: #4d5568;
+  font-weight: 500;
+}
+
+.snr-control input[type="range"] {
+  width: 100px;
+  height: 3px;
+}
+
+.snr-control .snr-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: #22c55e;
+  font-weight: 600;
+  min-width: 32px;
+}

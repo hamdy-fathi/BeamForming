@@ -16,7 +16,8 @@ async def simulate_fiveg(req: FiveGRequest):
     """Run 5G connectivity simulation with given towers and users."""
     towers = [t.model_dump() for t in req.towers]
     users = [u.model_dump() for u in req.users]
-    _sim.setup(towers, users)
+    obstacles = [o.model_dump() for o in req.obstacles] if req.obstacles else []
+    _sim.setup(towers, users, obstacles)
     return _sim.simulate()
 
 
