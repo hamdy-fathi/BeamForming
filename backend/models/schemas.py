@@ -34,7 +34,7 @@ class BeamformingRequest(BaseModel):
     snr: float = Field(100.0, ge=0, le=1000)
     window_type: WindowTypeEnum = WindowTypeEnum.RECTANGULAR
     medium_speed: float = Field(3e8, gt=0)
-    map_resolution: int = Field(150, ge=50, le=400)
+    map_resolution: int = Field(400, ge=50, le=800)
 
 
 # ── 5G ───────────────────────────────────────────────────────────────────

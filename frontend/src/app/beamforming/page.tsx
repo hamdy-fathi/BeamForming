@@ -85,94 +85,183 @@ export default function BeamformingPage() {
 
   useEffect(() => { compute(); }, [compute]);
 
-  // draw interference map + steering angle line
+  // draw interference map with blue-white-red diverging colormap
   useEffect(() => {
     if (!result?.interference_map?.map || !mapCanvasRef.current) return;
     const canvas = mapCanvasRef.current;
     const ctx = canvas.getContext("2d")!;
     const map = result.interference_map.map;
-    const h = map.length;
-    const w = map[0].length;
-    canvas.width = w;
-    canvas.height = h;
+    const mapH = map.length;
+    const mapW = map[0].length;
 
-    // Inferno-inspired colormap: black → deep purple → orange → yellow → white
-    const infernoMap = (t: number): [number, number, number] => {
-      // Clamp t
-      t = Math.max(0, Math.min(1, t));
-      // Color stops: 0→black, 0.2→deep indigo, 0.45→magenta/red, 0.7→orange, 0.9→yellow, 1.0→white
+    // DPI-aware sizing: measure from parent container to avoid 0-size issue
+    const dpr = window.devicePixelRatio || 1;
+    const parent = canvas.parentElement;
+    const cssW = parent ? parent.clientWidth - 80 : 800; // leave room for colorbar
+    const cssH = 455;
+    canvas.style.width = cssW + "px";
+    canvas.style.height = cssH + "px";
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Layout: add margins for axis labels
+    const margin = { top: 10, right: 10, bottom: 45, left: 55 };
+    const plotW = cssW - margin.left - margin.right;
+    const plotH = cssH - margin.top - margin.bottom;
+    const totalW = cssW;
+    const totalH = cssH;
+
+    ctx.fillStyle = "#1a1d27";
+    ctx.fillRect(0, 0, totalW, totalH);
+
+    // Dark-centered diverging colormap: deep blue → dark → deep red
+    // Maps value in [-1, 1] to colour; zero → near-black (fits dark theme)
+    const coolwarmMap = (v: number): [number, number, number] => {
+      v = Math.max(-1, Math.min(1, v));
       let r: number, g: number, b: number;
-      if (t < 0.2) {
-        const s = t / 0.2;
-        r = Math.round(s * 45);
-        g = Math.round(s * 10);
-        b = Math.round(10 + s * 80);
-      } else if (t < 0.45) {
-        const s = (t - 0.2) / 0.25;
-        r = Math.round(45 + s * 155);
-        g = Math.round(10 + s * 20);
-        b = Math.round(90 - s * 10);
-      } else if (t < 0.7) {
-        const s = (t - 0.45) / 0.25;
-        r = Math.round(200 + s * 45);
-        g = Math.round(30 + s * 110);
-        b = Math.round(80 - s * 60);
-      } else if (t < 0.9) {
-        const s = (t - 0.7) / 0.2;
-        r = Math.round(245 + s * 10);
-        g = Math.round(140 + s * 100);
-        b = Math.round(20 + s * 30);
+      if (v < 0) {
+        // Negative: dark → deep blue  (v: 0 → -1)
+        const s = -v; // 0 → 1
+        r = Math.round(22 * (1 - s));              // 22 → 0
+        g = Math.round(24 + s * 56);               // 24 → 80
+        b = Math.round(30 + s * 195);              // 30 → 225
       } else {
-        const s = (t - 0.9) / 0.1;
-        r = Math.round(255);
-        g = Math.round(240 + s * 15);
-        b = Math.round(50 + s * 205);
+        // Positive: dark → deep red  (v: 0 → 1)
+        const s = v;  // 0 → 1
+        r = Math.round(22 + s * 213);              // 22 → 235
+        g = Math.round(24 + s * 26);               // 24 → 50
+        b = Math.round(30 * (1 - s));              // 30 → 0
       }
       return [r, g, b];
     };
 
-    // Flip vertically: read row (h-1-y) so array elements (y=0 in data) appear at canvas bottom
-    const imgData = ctx.createImageData(w, h);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const srcRow = h - 1 - y; // flip vertically
-        const v = Math.max(0, Math.min(1, map[srcRow][x]));
-        const [cr, cg, cb] = infernoMap(v);
-        const idx = (y * w + x) * 4;
+    // Draw the heatmap into the plot area
+    // Render at full backing-store resolution for the plot region
+    const bmpW = Math.round(plotW * dpr);
+    const bmpH = Math.round(plotH * dpr);
+    const imgData = ctx.createImageData(bmpW, bmpH);
+    for (let py = 0; py < bmpH; py++) {
+      for (let px = 0; px < bmpW; px++) {
+        // Map canvas pixel to data row/col (flip Y so y=0 is at bottom)
+        const dataRow = mapH - 1 - Math.floor((py / bmpH) * mapH);
+        const dataCol = Math.floor((px / bmpW) * mapW);
+        const v = map[Math.min(dataRow, mapH - 1)][Math.min(dataCol, mapW - 1)];
+        const [cr, cg, cb] = coolwarmMap(v);
+        const idx = (py * bmpW + px) * 4;
         imgData.data[idx + 0] = cr;
         imgData.data[idx + 1] = cg;
         imgData.data[idx + 2] = cb;
         imgData.data[idx + 3] = 255;
       }
     }
-    ctx.putImageData(imgData, 0, 0);
-
-    // Draw steering angle radial line from bottom-center (array position) upward
-    const steerRad = (params.steering_angle * Math.PI) / 180;
-    const cx = w / 2;
-    const cy = h;         // array is at bottom now
-    const lineLen = Math.sqrt(w * w + h * h);
-    const ex = cx + Math.sin(steerRad) * lineLen;
-    const ey = cy - Math.cos(steerRad) * lineLen;
-
+    // Put image data at the margin offset (in device pixels)
+    // Save/restore because putImageData ignores transforms
     ctx.save();
-    ctx.strokeStyle = "rgba(0, 230, 255, 0.85)";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 5]);
-    ctx.shadowColor = "rgba(0, 210, 255, 0.6)";
-    ctx.shadowBlur = 6;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(ex, ey);
-    ctx.stroke();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to identity for putImageData
+    ctx.putImageData(imgData, Math.round(margin.left * dpr), Math.round(margin.top * dpr));
+    ctx.restore();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // restore DPI scale
+
+    // Axis info
+    const xArr = result.interference_map.x as number[];
+    const yArr = result.interference_map.y as number[];
+    const xMin = xArr[0], xMax = xArr[xArr.length - 1];
+    const yMin = yArr[0], yMax = yArr[yArr.length - 1];
+
+    // Helper: format axis value smartly
+    const fmtVal = (v: number) => {
+      const abs = Math.abs(v);
+      if (abs >= 1) return v.toFixed(1);
+      if (abs >= 0.01) return v.toFixed(2);
+      return v.toExponential(1);
+    };
+
+    // Draw axis tick marks and labels
+    ctx.fillStyle = "#b0b8cc";
+    ctx.strokeStyle = "#555a6e";
+    ctx.lineWidth = 1;
+    ctx.font = "11px 'Inter', sans-serif";
+
+    // X-axis ticks
+    const xTicks = 9;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (let i = 0; i <= xTicks; i++) {
+      const frac = i / xTicks;
+      const px = margin.left + frac * plotW;
+      const val = xMin + frac * (xMax - xMin);
+      // tick line
+      ctx.beginPath();
+      ctx.moveTo(px, margin.top + plotH);
+      ctx.lineTo(px, margin.top + plotH + 4);
+      ctx.stroke();
+      ctx.fillText(fmtVal(val), px, margin.top + plotH + 6);
+    }
+    // X-axis label
+    ctx.font = "12px 'Inter', sans-serif";
+    ctx.fillText("x (meters)", margin.left + plotW / 2, totalH - 8);
+
+    // Y-axis ticks
+    const yTicks = 6;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.font = "11px 'Inter', sans-serif";
+    for (let i = 0; i <= yTicks; i++) {
+      const frac = i / yTicks;
+      const py = margin.top + plotH - frac * plotH; // flip: 0 at bottom
+      const val = yMin + frac * (yMax - yMin);
+      ctx.beginPath();
+      ctx.moveTo(margin.left - 4, py);
+      ctx.lineTo(margin.left, py);
+      ctx.stroke();
+      ctx.fillText(fmtVal(val), margin.left - 7, py);
+    }
+    // Y-axis label (rotated)
+    ctx.save();
+    ctx.translate(14, margin.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.font = "12px 'Inter', sans-serif";
+    ctx.fillText("y (meters)", 0, 0);
     ctx.restore();
 
-    // Label
-    ctx.fillStyle = "rgba(0, 230, 255, 0.95)";
-    ctx.font = "bold 11px monospace";
-    ctx.textAlign = "center";
-    ctx.fillText(`${params.steering_angle}°`, cx + Math.sin(steerRad) * 40, cy - Math.cos(steerRad) * 40 - 6);
-  }, [result, params.steering_angle]);
+    // Draw transmitter element dots at the bottom of the plot
+    const numElems = params.num_elements;
+    const elemSpacing = params.element_spacing;
+    // Element positions in data coordinates
+    for (let n = 0; n < numElems; n++) {
+      const elemDataX = (n - (numElems - 1) / 2.0) * elemSpacing * (result.parameters?.wavelength || 1);
+      // Convert data X to pixel X
+      const fracX = (elemDataX - xMin) / (xMax - xMin);
+      if (fracX < 0 || fracX > 1) continue;
+      const px = margin.left + fracX * plotW;
+      const py = margin.top + plotH; // bottom of plot
+
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "#2563eb";
+      ctx.fill();
+      ctx.strokeStyle = "#1e40af";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Transmitter legend
+    ctx.fillStyle = "#2563eb";
+    ctx.beginPath();
+    ctx.arc(margin.left + plotW - 90, margin.top + 16, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#b0b8cc";
+    ctx.font = "11px 'Inter', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("Transmitters", margin.left + plotW - 82, margin.top + 20);
+
+    // Plot border
+    ctx.strokeStyle = "#555a6e";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(margin.left, margin.top, plotW, plotH);
+  }, [result, params.steering_angle, params.num_elements, params.element_spacing, params.frequency, params.phase_offset, params.signal_type, params.snr, params.window_type, params.medium_speed, params.map_resolution]);
 
   // draw Cartesian beam profile
   useEffect(() => {
@@ -180,9 +269,12 @@ export default function BeamformingPage() {
     const canvas = profileCanvasRef.current;
     const ctx = canvas.getContext("2d")!;
     const { angles, magnitudes_db } = result.beam_profile;
-    const W = 500, H = 300;
-    canvas.width = W;
-    canvas.height = H;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.scale(dpr, dpr);
 
     ctx.fillStyle = "#191c24";
     ctx.fillRect(0, 0, W, H);
@@ -256,9 +348,12 @@ export default function BeamformingPage() {
     const canvas = polarCanvasRef.current;
     const ctx = canvas.getContext("2d")!;
     const { angles, magnitudes_db } = result.beam_profile;
-    const W = 300, H = 300;
-    canvas.width = W;
-    canvas.height = H;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.scale(dpr, dpr);
     const cx = W / 2, cy = H / 2;
     const maxR = W / 2 - 20;
 
@@ -350,9 +445,12 @@ export default function BeamformingPage() {
     const canvas = windowCanvasRef.current;
     const ctx = canvas.getContext("2d")!;
     const weights = result.window_weights;
-    const W = 250, H = 100;
-    canvas.width = W;
-    canvas.height = H;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.scale(dpr, dpr);
 
     ctx.fillStyle = "#191c24";
     ctx.fillRect(0, 0, W, H);
@@ -534,7 +632,7 @@ export default function BeamformingPage() {
           <Slider
             label="Map Resolution"
             value={params.map_resolution}
-            min={50} max={300} step={10}
+            min={50} max={800} step={10}
             onChange={(v) => updateParam("map_resolution", v)}
           />
         </div>
@@ -549,21 +647,24 @@ export default function BeamformingPage() {
             <div className="flex items-center gap-4">
               <canvas
                 ref={mapCanvasRef}
-                className="w-full max-h-[400px] rounded border border-border object-contain"
-                style={{ imageRendering: "auto" }}
+                className="w-full rounded border border-border"
+                style={{ height: 455 }}
               />
               {/* Color bar */}
               <div className="flex flex-col items-center gap-1">
-                <span className="text-[10px] text-text-muted">Max</span>
+                <span className="text-[10px] text-text-muted">1.00</span>
                 <div
                   className="w-4 rounded"
                   style={{
                     height: 200,
                     background:
-                      "linear-gradient(to bottom, rgb(255,255,255), rgb(255,240,50), rgb(245,140,20), rgb(200,30,80), rgb(45,10,90), rgb(0,0,10))",
+                      "linear-gradient(to bottom, rgb(235,50,0), rgb(130,35,15), rgb(22,24,30), rgb(10,50,120), rgb(0,80,225))",
                   }}
                 />
-                <span className="text-[10px] text-text-muted">Min</span>
+                <span className="text-[10px] text-text-muted">-1.00</span>
+                <span className="text-[9px] text-text-muted mt-1 writing-mode-vertical" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: "0.5px" }}>
+                  Interference Intensity
+                </span>
               </div>
             </div>
           </div>
@@ -587,7 +688,7 @@ export default function BeamformingPage() {
                 <canvas
                   ref={polarCanvasRef}
                   className="rounded border border-border"
-                  style={{ width: 300, height: 300 }}
+                  style={{ width: 340, height: 340 }}
                 />
               </div>
             </div>

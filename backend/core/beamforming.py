@@ -112,17 +112,21 @@ class BeamformingSimulator:
     # ── 2-D Interference Map ────────────────────────────────────────────
     def interference_map(
         self,
-        x_range: tuple[float, float] = (-1.0, 1.0),
-        y_range: tuple[float, float] = (0.0, 2.0),
         resolution: int = 200,
     ) -> dict:
-        """Compute 2-D pressure / field-intensity map.
+        """Compute 2-D constructive/destructive interference map.
 
         Array is placed along x-axis at y=0.
-        Returns dict with 'map' (2-D list), 'x' and 'y' axes.
+        Returns the real part of the superposed field normalised to [-1, 1]
+        so that positive values represent constructive interference and
+        negative values represent destructive interference.
         """
-        x = np.linspace(x_range[0], x_range[1], resolution)
-        y = np.linspace(y_range[0], y_range[1], resolution)
+        # Scale spatial range to ~30 wavelengths so fringes are visible
+        half_x = max(self.wavelength * 15, self.d * self.num_elements * 2)
+        y_max = max(self.wavelength * 15, half_x)
+
+        x = np.linspace(-half_x, half_x, resolution)
+        y = np.linspace(0.01 * self.wavelength, y_max, resolution)
         X, Y = np.meshgrid(x, y)
 
         # element positions along x-axis centred at origin
@@ -134,22 +138,27 @@ class BeamformingSimulator:
             dx = X - ex
             dy = Y
             r = np.sqrt(dx**2 + dy**2) + 1e-30
-            # steering phase
+            # steering phase for each element
             steer_phase = self.k * ex * np.sin(self.steering_angle_rad)
             field += self.weights[i] * np.exp(1j * (self.k * r + steer_phase + self.phase_offset)) / np.sqrt(r)
 
-        intensity = np.abs(field) ** 2
-        # normalise to [0, 1]
-        intensity /= (np.max(intensity) + 1e-30)
+        # Take the real part to show the oscillating wave pattern
+        real_field = np.real(field)
+
+        # Normalise to [-1, 1]
+        peak = np.max(np.abs(real_field)) + 1e-30
+        real_field /= peak
 
         # apply noise
-        intensity = add_noise_2d(intensity, self.snr)
-        intensity = np.clip(intensity, 0, 1)
+        real_field = add_noise_2d(real_field, self.snr)
+        real_field = np.clip(real_field, -1, 1)
 
         return {
-            "map": intensity.tolist(),
+            "map": real_field.tolist(),
             "x": x.tolist(),
             "y": y.tolist(),
+            "x_range": [-half_x, half_x],
+            "y_range": [0, y_max],
         }
 
     # ── Convenience: get all outputs ─────────────────────────────────────

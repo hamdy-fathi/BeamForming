@@ -39,7 +39,7 @@ export const defaultBeamformingParams: BeamformingParams = {
   snr: 100,
   window_type: "rectangular",
   medium_speed: 3e8,
-  map_resolution: 150,
+  map_resolution: 400,
 };
 
 export function computeBeamforming(params: BeamformingParams) {
