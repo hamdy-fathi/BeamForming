@@ -153,11 +153,36 @@ class RadarScanRequest(BaseModel):
 
 
 class RadarFullSweepRequest(BaseModel):
-    beam_width:     float = Field(10.0, ge=1,   le=90)
-    scan_speed:     float = Field(30.0, ge=1,   le=120)  # RPM
-    num_elements:   int   = Field(32,   ge=2,   le=128)
+    beam_width:      float = Field(10.0, ge=1,   le=90)
+    scan_speed:      float = Field(30.0, ge=1,   le=120)  # RPM
+    num_elements:    int   = Field(32,   ge=2,   le=128)
     element_spacing: float = Field(0.5, ge=0.1, le=2.0)
-    frequency:      float = Field(3e9,  gt=0)
-    window_type:    WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr:            float = Field(200.0, ge=0,  le=1000)
-    targets:        list[RadarTarget] = []
+    frequency:       float = Field(3e9,  gt=0)
+    window_type:     WindowTypeEnum = WindowTypeEnum.HAMMING
+    snr:             float = Field(200.0, ge=0,  le=1000)
+    detection_threshold: float = Field(12.0, ge=0, le=100)  # dB above noise
+    targets:         list[RadarTarget] = []
+
+
+class RadarDetection(BaseModel):
+    det_id: int
+    est_range: float
+    est_angle: float
+    signal_level: float
+    est_size: float
+    uncertainty_range: float
+    uncertainty_angle: float
+    uncertainty_size: float
+    num_hits: int
+
+
+class RadarFullSweepResponse(BaseModel):
+    beam_width: float
+    scan_speed_rpm: float
+    num_steps: int
+    scan_time_seconds: float
+    ppi_data: list[dict]
+    range_max: float
+    detections: list[RadarDetection]
+    ground_truth: list[RadarTarget]
+    matched: list[dict]

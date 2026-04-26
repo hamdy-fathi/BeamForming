@@ -101,6 +101,18 @@ export function updateVessel(data: any) {
 export function radarScan(data: any) {
   return request<any>("/api/radar/scan", { method: "POST", body: JSON.stringify(data) });
 }
-export function radarFullSweep(data: any) {
+export interface RadarFullSweepPayload {
+  beam_width: number;
+  scan_speed: number;
+  targets: Array<{ id: number; distance: number; angle: number; size: number }>;
+  num_elements: number;
+  element_spacing: number;
+  frequency: number;
+  window_type: string;
+  snr: number;
+  detection_threshold: number;
+}
+
+export function radarFullSweep(data: RadarFullSweepPayload) {
   return request<any>("/api/radar/full-sweep", { method: "POST", body: JSON.stringify(data) });
 }
