@@ -66,6 +66,8 @@ class UltrasoundSimulator:
         snr:         float = 200.0,
         num_samples: int   = 512,
         max_depth:   float = 2.5,  # phantom units (~25 cm)
+        normalize:   bool  = True, # False = return raw energy amplitudes (for B-mode)
+        tgc_gain:    float = 3.0,  # TGC exponent; 3.0 for A-mode display, 1.5 for B-mode
     ) -> dict:
         """Compute A-mode scanline.
 
@@ -146,17 +148,22 @@ class UltrasoundSimulator:
             # Acoustic shadowing: reduce forward energy by transmission factor
             energy *= np.sqrt(isect["transmission_factor"])
 
+        # -- Noise (added BEFORE TGC so TGC does not amplify noise floor) --
+        signal = add_noise_1d(signal, snr)
+
         # -- Time-Gain Compensation (TGC) --
-        tgc = np.exp(1.5 * np.linspace(0, 1, num_samples))
+        # exp(tgc_gain): at max depth gain = e^gain
+        # A-mode: gain=3.0 → ≈20x (26 dB) — compensates ~0.5 dB/cm/MHz at 5 MHz over 20 cm
+        # B-mode: gain=1.5 → ≈4.5x (13 dB) — gentler so tissue reflectivity differences remain
+        tgc = np.exp(tgc_gain * np.linspace(0, 1, num_samples))
         signal *= tgc
 
-        # -- Normalise --
-        peak = np.max(np.abs(signal))
-        if peak > 0:
-            signal /= peak
+        if normalize:
+            # Per-scanline normalisation (for A-mode display): peak = 1
+            peak = np.max(np.abs(signal))
+            if peak > 0:
+                signal /= peak
 
-        # -- Noise --
-        signal = add_noise_1d(signal, snr)
         signal = np.clip(signal, -1.0, 1.0)
 
         depths_m = np.linspace(0, max_depth_m, num_samples)
@@ -181,15 +188,18 @@ class UltrasoundSimulator:
         frequency:         float = 5e6,
         snr:               float = 200.0,
         num_samples:       int   = 400,
-        max_depth:         float = 2.5,
+        max_depth:         float = 2.0,   # phantom units; 2.0 = 20 cm covers full phantom
     ) -> dict:
         """Assemble B-mode image by sweeping the beam angle from probe position.
 
         Returns a 2-D array [scanline][sample] of log-compressed amplitude
         values (0–1) for frontend canvas rendering.
+
+        Global 2D normalization is applied so no single bright surface
+        reflection drowns out the deeper, weaker echoes.
         """
-        angles = np.linspace(sweep_start_angle, sweep_end_angle, num_scanlines)
-        image  = []
+        angles  = np.linspace(sweep_start_angle, sweep_end_angle, num_scanlines)
+        raw_env = []   # collect un-normalised envelope per scanline
 
         for angle in angles:
             result = self.a_mode(
@@ -200,11 +210,47 @@ class UltrasoundSimulator:
                 snr=snr,
                 num_samples=num_samples,
                 max_depth=max_depth,
+                normalize=False,   # preserve raw energy so global 2D norm works correctly
+                tgc_gain=0.0,      # NO TGC: let Beer-Lambert attenuation be physically visible.
+                                   # TGC would compensate depth losses and hide:
+                                   #   (a) acoustic shadowing (far skull must be darker)
+                                   #   (b) frequency-dependent penetration (10 MHz dies out
+                                   #       5× faster per cm than 2 MHz — must be visible)
             )
             env = np.abs(np.array(result["amplitudes"]))
-            # Log compression to [0, 1]
-            env = np.log1p(env * 9.0) / np.log1p(9.0)
-            image.append(env.tolist())
+            raw_env.append(env)
+
+        # ── Lateral scanline smoothing ─────────────────────────────────────
+        # Average each depth sample across 5 adjacent scanlines (weighted kernel).
+        # Tissue boundaries are spatially coherent (same depth ±few scanlines)
+        # → preserved.  Random noise is incoherent → reduced by ~√3 ≈ 1.73×.
+        # This is equivalent to spatial compounding in real ultrasound hardware.
+        stack = np.stack(raw_env, axis=0)          # (num_scanlines, num_samples)
+        lateral_kernel  = np.array([1, 2, 3, 2, 1], dtype=float) / 9.0
+        stack = np.apply_along_axis(
+            lambda col: np.convolve(col, lateral_kernel, mode="same"),
+            axis=0,   # smooth across scanlines for each depth sample
+            arr=stack,
+        )
+
+        # ── Global 2D normalisation ────────────────────────────────────────
+        p99   = float(np.percentile(stack, 99))
+        if p99 > 0:
+            stack /= p99
+        stack = np.clip(stack, 0.0, 1.0)
+
+        # ── Noise gate ─────────────────────────────────────────────────────
+        # At SNR=200: raw noise/p99 ≈ 0.008; after lateral smoothing ≈ 0.005.
+        # Gate at 0.004 catches most residual noise while tissue echoes
+        # at 2–5 MHz (≈0.002 of skull) remain visible after log compression.
+        noise_gate = 0.004
+        stack[stack < noise_gate] = 0.0
+
+        # ── Log compression ────────────────────────────────────────────────
+        # 60 dB range (999×): lifts inner tissue echoes (0.15–0.4 % of skull)
+        # to 2–5 % gray before depth fade, making them faintly visible at 2–5 MHz
+        # while they disappear naturally at 10 MHz (correct frequency behaviour).
+        image = (np.log1p(stack * 999.0) / np.log1p(999.0)).tolist()
 
         max_depth_m = max_depth * self.phantom.SCALE
         depths_m    = np.linspace(0, max_depth_m, num_samples)

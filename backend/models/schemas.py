@@ -117,8 +117,8 @@ class BModeRequest(BaseModel):
     """Auto-sweep B-mode: backend generates all scanlines."""
     probe_x:          float
     probe_y:          float
-    sweep_start_angle: float = Field(-40.0, ge=-90, le=90)
-    sweep_end_angle:   float = Field(40.0,  ge=-90, le=90)
+    sweep_start_angle: float = Field(-40.0, ge=-180, le=180)
+    sweep_end_angle:   float = Field(40.0,  ge=-180, le=180)
     num_scanlines:     int   = Field(128,   ge=16,  le=512)
     beam_params:       USBeamParams = USBeamParams()
 

@@ -50,9 +50,11 @@ function drawPhantom(
   ctx.fillRect(0, 0, PH_SIZE, PH_SIZE);
 
   // Helper: phantom coords → canvas pixels
+  // Phantom: x ∈ [-1,1] left→right, y ∈ [-1,1] bottom→top
+  // Canvas:  x ∈ [0,PH_SIZE] left→right, y ∈ [0,PH_SIZE] top→bottom  (flip Y)
   const toCanvas = (px: number, py: number) => ({
     cx: ((px + 1) / 2) * PH_SIZE,
-    cy: ((py + 1) / 2) * PH_SIZE,
+    cy: ((1 - py) / 2) * PH_SIZE,
   });
 
   // Draw ellipses: outermost first (id=0), innermost last
@@ -84,11 +86,12 @@ function drawPhantom(
       ctx.stroke();
       ctx.restore();
 
-      // Velocity arrow for vessel
+      // Velocity arrow for vessel — in canvas coords, dy is flipped
       if (isVessel && (el.vx !== 0 || el.vy !== 0)) {
         const speed = Math.sqrt(el.vx ** 2 + el.vy ** 2);
         const arrowLen = Math.min(50, speed * 60);
-        const adir = Math.atan2(el.vy, el.vx);
+        // vy is in phantom coords (up=+), canvas Y is down, so flip vy
+        const adir = Math.atan2(-el.vy, el.vx);
         ctx.save();
         ctx.strokeStyle = "#ef4444";
         ctx.lineWidth   = 2;
@@ -96,7 +99,6 @@ function drawPhantom(
         ctx.moveTo(cx, cy);
         ctx.lineTo(cx + Math.cos(adir) * arrowLen, cy + Math.sin(adir) * arrowLen);
         ctx.stroke();
-        // Arrowhead
         const hx = cx + Math.cos(adir) * arrowLen;
         const hy = cy + Math.sin(adir) * arrowLen;
         ctx.beginPath();
@@ -107,7 +109,6 @@ function drawPhantom(
         ctx.fillStyle = "#ef4444";
         ctx.fill();
         ctx.restore();
-
         ctx.fillStyle = "#ef4444";
         ctx.font = "9px monospace";
         ctx.fillText(`v=${speed.toFixed(2)} m/s`, cx + arrowLen * 0.4, cy - 5);
@@ -118,27 +119,40 @@ function drawPhantom(
   // Probe
   const { cx: px, cy: py } = toCanvas(probePos.x, probePos.y);
 
-  // Beam ray
-  const bRad = (beamAngle * Math.PI) / 180;
-  const rayLen = 280;
-  const rx = px + Math.sin(bRad) * rayLen;
-  const ry = py - Math.cos(bRad) * rayLen;
+  // Beam ray — replicate Python's _beam_direction(probe_x, probe_y, beam_angle):
+  //   inward = normalize(-probe_x, -probe_y)   [toward phantom centre]
+  //   right  = (inward_y, -inward_x)           [90° clockwise from inward]
+  //   beam   = inward·cos(a) + right·sin(a)
+  //
+  // Canvas Y is flipped vs phantom Y, so canvas_dy = -beam_dy.
+  (function() {
+    const rr = Math.sqrt(probePos.x ** 2 + probePos.y ** 2) || 1e-12;
+    const nx = -probePos.x / rr;
+    const ny = -probePos.y / rr;
+    const rightX =  ny;
+    const rightY = -nx;
+    const a  = (beamAngle * Math.PI) / 180;
+    const bdx =  nx * Math.cos(a) + rightX * Math.sin(a);  // phantom x
+    const bdy =  ny * Math.cos(a) + rightY * Math.sin(a);  // phantom y (up=+)
+    const rayLen = 290;
+    const rx = px + bdx * rayLen;          // canvas: x same
+    const ry = py + (-bdy) * rayLen;       // canvas: flip Y
 
-  // Beam gradient
-  const grad = ctx.createLinearGradient(px, py, rx, ry);
-  grad.addColorStop(0,   "rgba(100,180,255,0.7)");
-  grad.addColorStop(0.4, "rgba(100,180,255,0.25)");
-  grad.addColorStop(1,   "rgba(100,180,255,0)");
-  ctx.save();
-  ctx.strokeStyle = grad;
-  ctx.lineWidth   = 2;
-  ctx.setLineDash([6, 4]);
-  ctx.beginPath();
-  ctx.moveTo(px, py);
-  ctx.lineTo(rx, ry);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.restore();
+    const grad = ctx.createLinearGradient(px, py, rx, ry);
+    grad.addColorStop(0,   "rgba(100,180,255,0.7)");
+    grad.addColorStop(0.4, "rgba(100,180,255,0.25)");
+    grad.addColorStop(1,   "rgba(100,180,255,0)");
+    ctx.save();
+    ctx.strokeStyle = grad;
+    ctx.lineWidth   = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(rx, ry);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  })();
 
   // Probe dot
   ctx.save();
@@ -241,55 +255,142 @@ export default function UltrasoundPage() {
   const runBSweep = useCallback(async () => {
     setBLoading(true);
     try {
+      const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
       const d = await bModeSweep({
         probe_x: probePos.x, probe_y: probePos.y,
-        sweep_start_angle: -40, sweep_end_angle: 40,
+        // Sweep ±40° centred on the current beam-angle slider position (clamped to ±170°)
+        sweep_start_angle: clamp(beamAngle - 40, -170, 170),
+        sweep_end_angle:   clamp(beamAngle + 40, -170, 170),
         num_scanlines: 128, beam_params: beamParams,
       });
       setBMode(d);
     } catch (e) { console.error(e); }
     finally { setBLoading(false); }
-  }, [probePos, beamParams]);
+  }, [probePos, beamAngle, beamParams]);
 
-  // Draw B-mode image to canvas
+  // Draw B-mode image to canvas — FIXED canonical sector display
+  // Apex always at top-centre, fan always opens straight down.
+  // Probe position / beam angle affect image *content* only.
   useEffect(() => {
     if (!bMode?.image?.length || !bRef.current) return;
     const canvas = bRef.current;
     const ctx    = canvas.getContext("2d");
     if (!ctx) return;
     const W = canvas.clientWidth  || 500;
-    const H = canvas.clientHeight || 320;
+    const H = canvas.clientHeight || 360;
     canvas.width  = W;
     canvas.height = H;
+
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
 
     const img      = bMode.image as number[][];
     const nLines   = img.length;
     const nSamples = img[0]?.length ?? 0;
     if (!nSamples) return;
 
+    const angles: number[] = bMode.angles ?? [];
+    if (angles.length !== nLines) return;
+
+    // ── Fixed display geometry (never changes with probe position/angle) ──
+    const MARGIN = 12;
+
+    // Total sweep angular span — purely used for the width of the fan
+    const sweepSpanRad = Math.abs(angles[nLines - 1] - angles[0]) * Math.PI / 180;
+    const halfSpanRad  = sweepSpanRad / 2;
+
+    // Apex always top-centre; fan always opens straight downward (= π/2 from +X)
+    const apexX = W / 2;
+    const apexY = MARGIN;
+
+    // Largest depth radius that fits: vertically and horizontally
+    const maxDepthY = H - MARGIN - apexY;
+    const maxDepthX = (W / 2 - MARGIN) / (Math.sin(halfSpanRad) + 0.001);
+    const depthScale = Math.min(maxDepthY, maxDepthX);
+
+    // Fixed canvas angles: left scanline at (π/2 − halfSpan), right at (π/2 + halfSpan)
+    // atan2 convention: π/2 = pointing straight down
+    const canvasAngleLo = Math.PI / 2 - halfSpanRad;
+    const canvasAngleHi = Math.PI / 2 + halfSpanRad;
+
+    // ── Pixel-by-pixel inverse polar mapping ─────────────────────────────
     const id = ctx.createImageData(W, H);
 
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const si  = Math.floor((x / W) * nLines);
-        const di  = Math.floor((y / H) * nSamples);
-        const raw = Math.min(1, Math.max(0, img[si]?.[di] ?? 0));
-        // Grayscale with mild teal tint for aesthetics
-        const v   = Math.round(raw * 255);
-        const idx = (y * W + x) * 4;
-        id.data[idx]     = Math.round(v * 0.85);
-        id.data[idx + 1] = v;
-        id.data[idx + 2] = Math.round(v * 0.9);
+    for (let py = apexY; py < H; py++) {
+      const offY = py - apexY;
+      for (let px = 0; px < W; px++) {
+        const offX = px - apexX;
+
+        // Radial distance = depth proxy
+        const rPx = Math.sqrt(offX * offX + offY * offY);
+        if (rPx < 2) continue;
+
+        const depthFrac = rPx / depthScale;
+        if (depthFrac > 1.0) continue;
+
+        // Canvas angle of this pixel (only the downward half-plane matters)
+        const pixAngle = Math.atan2(offY, offX);
+        if (pixAngle < canvasAngleLo - 0.004 || pixAngle > canvasAngleHi + 0.004) continue;
+
+        // Map canvas angle → fractional scanline index (0 = leftmost, N-1 = rightmost)
+        const scanFrac = (pixAngle - canvasAngleLo) / (sweepSpanRad + 1e-12) * (nLines - 1);
+        const si0 = Math.max(0, Math.floor(scanFrac));
+        const si1 = Math.min(nLines - 1, si0 + 1);
+        const tx  = scanFrac - si0;
+
+        // Map radial distance → fractional depth sample index
+        const depthIdx = depthFrac * (nSamples - 1);
+        const di0 = Math.floor(depthIdx);
+        const di1 = Math.min(nSamples - 1, di0 + 1);
+        const ty  = depthIdx - di0;
+
+        // Bilinear interpolation
+        const v00 = img[si0]?.[di0] ?? 0;
+        const v10 = img[si1]?.[di0] ?? 0;
+        const v01 = img[si0]?.[di1] ?? 0;
+        const v11 = img[si1]?.[di1] ?? 0;
+        const raw = Math.min(1, Math.max(0,
+          v00 * (1 - tx) * (1 - ty) +
+          v10 *      tx  * (1 - ty) +
+          v01 * (1 - tx) *      ty  +
+          v11 *      tx  *      ty,
+        ));
+
+        // Depth-dependent display fade — continuous "deeper = darker" gradient.
+        // k=2.5 → near probe: ×1.0, mid-depth: ×0.29, max depth: exp(-2.5)≈0.08.
+        const depthFade = Math.exp(-2.5 * depthFrac);
+        const val = raw * depthFade;
+
+        const gray = Math.round(val * 255);
+        const idx  = (py * W + px) * 4;
+        id.data[idx]     = gray;
+        id.data[idx + 1] = gray;
+        id.data[idx + 2] = gray;
         id.data[idx + 3] = 255;
       }
     }
     ctx.putImageData(id, 0, 0);
 
-    // Overlay labels
-    ctx.fillStyle = "rgba(100,180,255,0.55)";
+    // Thin arc outline at max depth
+    ctx.save();
+    ctx.strokeStyle = "rgba(100,180,255,0.20)";
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.arc(apexX, apexY, depthScale, canvasAngleLo, canvasAngleHi);
+    ctx.lineTo(apexX, apexY);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    // Label
+    const startDeg = angles[0].toFixed(0);
+    const endDeg   = angles[nLines - 1].toFixed(0);
+    ctx.fillStyle = "rgba(100,180,255,0.6)";
     ctx.font      = "10px monospace";
-    ctx.fillText(`B-Mode — ${nLines} scanlines × ${nSamples} samples`, 6, 14);
+    ctx.fillText(`B-Mode  ${nLines} lines · sweep ${startDeg}°→${endDeg}°`, 8, H - 8);
   }, [bMode]);
+
+
 
   // ── Doppler ───────────────────────────────────────────────────────────
   const runDoppler = useCallback(async () => {
@@ -325,8 +426,8 @@ export default function UltrasoundPage() {
   const phantomCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
     return {
-      mx: ((e.clientX - rect.left) / rect.width)  * 2 - 1,
-      my: ((e.clientY - rect.top)  / rect.height) * 2 - 1,
+      mx:  ((e.clientX - rect.left) / rect.width)  * 2 - 1,
+      my: 1 - ((e.clientY - rect.top)  / rect.height) * 2,  // flip Y
     };
   };
 
@@ -399,7 +500,9 @@ export default function UltrasoundPage() {
     });
     const p = await getPhantom(); setPhantom(p);
     setSelected(null); setEditModal(null);
-    if (activeTab === "a") runAScan();
+    if (activeTab === "a")       runAScan();
+    if (activeTab === "b")       runBSweep();
+    if (activeTab === "doppler") runDoppler();
   };
 
   // ── Vessel velocity apply ──────────────────────────────────────────────
@@ -593,8 +696,8 @@ export default function UltrasoundPage() {
                       <Tooltip
                         contentStyle={{ backgroundColor: "#191c24", borderColor: "#2a2f3b", fontSize: 11 }}
                         itemStyle={{ color: "#6b8cbe" }}
-                        formatter={(v: number) => [v.toFixed(4), "Amplitude"]}
-                        labelFormatter={(l: number) => `Depth: ${l} cm`}
+                        formatter={(v: any) => [Number(v).toFixed(4), "Amplitude"]}
+                        labelFormatter={(l: any) => `Depth: ${l} cm`}
                       />
                       {/* Boundary markers */}
                       {aMode?.intersections?.map((isect: any, i: number) => (
@@ -757,8 +860,8 @@ export default function UltrasoundPage() {
                       <YAxis stroke="#555968" tick={{ fill:"#555968", fontSize:9 }} domain={[0,1]} />
                       <Tooltip
                         contentStyle={{ backgroundColor:"#191c24", borderColor:"#2a2f3b", fontSize:11 }}
-                        formatter={(v: number, n: string) => [v.toFixed(4), n === "mag" ? "Magnitude" : n]}
-                        labelFormatter={(l: number) => `f = ${(+l).toFixed(0)} Hz`}
+                        formatter={(v: any, n: any) => [Number(v).toFixed(4), n === "mag" ? "Magnitude" : n]}
+                        labelFormatter={(l: any) => `f = ${(+l).toFixed(0)} Hz`}
                       />
                       <ReferenceLine x={0} stroke="#555968" strokeDasharray="4 2" />
                       <Area type="monotone" dataKey="mag" stroke="#c0635f" fill="url(#dGrad)"
