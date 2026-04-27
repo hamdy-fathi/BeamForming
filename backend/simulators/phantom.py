@@ -62,11 +62,11 @@ class Ellipse:
 # Physical scale: 1 unit ≈ 10 cm  →  phantom diameter ≈ 18.4 cm.
 
 _SL: list[dict] = [
-    # id  name                  cx      cy       a      b      θ   gray    tissue_name       c      ρ       α
-    dict(id=0, name="Outer skull",      center_x=0.0,   center_y=0.0,     semi_a=0.69,  semi_b=0.92,  theta_deg=0,   gray_level=2.0,  tissue_name="Skull bone",    speed=4080, density=1912, attenuation=20.0),
-    dict(id=1, name="Brain",            center_x=0.0,   center_y=-0.0184, semi_a=0.6624,semi_b=0.874, theta_deg=0,   gray_level=-0.98,tissue_name="Brain tissue",  speed=1560, density=1040, attenuation=0.6),
-    dict(id=2, name="Right ventricle",  center_x=0.22,  center_y=0.0,     semi_a=0.11,  semi_b=0.31,  theta_deg=-18, gray_level=-0.02,tissue_name="White matter",  speed=1552, density=1043, attenuation=0.7),
-    dict(id=3, name="Left ventricle",   center_x=-0.22, center_y=0.0,     semi_a=0.16,  semi_b=0.41,  theta_deg=18,  gray_level=-0.02,tissue_name="Gray matter",   speed=1541, density=1038, attenuation=0.6),
+    # id              name                  cx                cy                a             b             θ           gray                tissue_name                 c            ρ             α
+    dict(id=0, name="Outer skull",      center_x=0.0,   center_y=0.0,     semi_a=0.69,  semi_b=0.92,  theta_deg=0,   gray_level=2.0,  tissue_name="Skull bone",    speed=3500, density=1900, attenuation=3.0),
+    dict(id=1, name="Brain",            center_x=0.0,   center_y=-0.0184, semi_a=0.6624,semi_b=0.874, theta_deg=0,   gray_level=-0.98,tissue_name="Brain tissue",  speed=1560, density=1040, attenuation=0.1),
+    dict(id=2, name="Right ventricle",  center_x=0.22,  center_y=0.0,     semi_a=0.11,  semi_b=0.31,  theta_deg=18,  gray_level=-0.02,tissue_name="White matter",  speed=1552, density=1043, attenuation=0.15),
+    dict(id=3, name="Left ventricle",   center_x=-0.22, center_y=0.0,     semi_a=0.16,  semi_b=0.41,  theta_deg=-18, gray_level=-0.02,tissue_name="Gray matter",   speed=1541, density=1038, attenuation=0.1),
     dict(id=4, name="Top structure",    center_x=0.0,   center_y=0.35,    semi_a=0.21,  semi_b=0.25,  theta_deg=0,   gray_level=0.01, tissue_name="CSF fluid",     speed=1515, density=1007, attenuation=0.002),
     dict(id=5, name="Small lesion A",   center_x=0.0,   center_y=0.1,     semi_a=0.046, semi_b=0.046, theta_deg=0,   gray_level=0.01, tissue_name="Tumor/lesion",  speed=1580, density=1060, attenuation=1.0),
     dict(id=6, name="Small lesion B",   center_x=0.0,   center_y=-0.1,    semi_a=0.046, semi_b=0.046, theta_deg=0,   gray_level=0.01, tissue_name="Tumor/lesion",  speed=1580, density=1060, attenuation=1.0),
