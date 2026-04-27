@@ -56,9 +56,15 @@ class FiveGSimulator:
             window_type_str = t.get("window_type", "hamming")
             kaiser_beta = t.get("kaiser_beta", 6.0)
 
+            # Spacing slider is d/λ at 28 GHz reference.
+            # Changing frequency scales effective d/λ: higher f → narrower beam.
+            ref_freq = 28e9
+            nominal_spacing = t.get("element_spacing", 0.5)
+            effective_spacing = nominal_spacing * (freq / ref_freq)
+
             sim = BeamformingSimulator(
                 num_elements=t.get("num_elements", 32),
-                element_spacing=t.get("element_spacing", 0.5),
+                element_spacing=effective_spacing,
                 frequency=freq,
                 steering_angle=steering_angle,
                 snr=snr,

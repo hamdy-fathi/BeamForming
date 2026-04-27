@@ -5,9 +5,9 @@ export const TOWER_COLORS = ["#22c55e", "#3b82f6", "#f59e0b"];
 export const USER_COLORS = ["#ef4444", "#a855f7"];
 
 export const DEFAULT_TOWERS = [
-  { position: { x: 200, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
-  { position: { x: 600, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
-  { position: { x: 400, y: 150 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
+  { position: { x: 200, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
+  { position: { x: 600, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
+  { position: { x: 400, y: 150 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
 ];
 
 export const DEFAULT_USERS = [
@@ -213,6 +213,10 @@ export function TowerCard({ tower, tResult, index, updateParam, userPositions }:
             onChange={v => updateParam(index, "power_dbm", v)} />
           <TowerParamRow label="Steering" value={tower.steering_angle ?? 0} min={-89} max={89} step={1} unit="°"
             onChange={v => updateParam(index, "steering_angle", v)} color={color} />
+          <TowerParamRow label="Radius" value={tower.coverage_radius ?? 500} min={100} max={1000} step={25} unit="m"
+            onChange={v => updateParam(index, "coverage_radius", v)} />
+          <TowerParamRow label="Kaiser β" value={tower.kaiser_beta ?? 6} min={0} max={20} step={0.5}
+            onChange={v => updateParam(index, "kaiser_beta", v)} />
           <div className="flex gap-3 text-[10px] text-text-muted pt-0.5">
             <span>Users: <span className="text-text-primary font-mono">{conns.length}</span></span>
             <span>Total Power / User: <span className="text-text-primary font-mono">

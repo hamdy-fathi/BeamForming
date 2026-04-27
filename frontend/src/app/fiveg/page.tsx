@@ -14,8 +14,6 @@ export default function FiveGPage() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [globalSnr, setGlobalSnr] = useState(250);
-  const [globalWindow, setGlobalWindow] = useState("kaiser");
-  const [globalBeta, setGlobalBeta] = useState(6.0);
   const [viz, setViz] = useState<Record<string, boolean>>({
     beams: true, sidelobes: true, coverage: true, connections: true, grid: true,
   });
@@ -38,8 +36,8 @@ export default function FiveGPage() {
       const towersWithGlobals = t.map(tw => ({
         ...tw,
         snr: globalSnr >= 1000 ? 1000 : globalSnr,
-        window_type: globalWindow,
-        kaiser_beta: globalBeta,
+        window_type: "kaiser",
+        kaiser_beta: tw.kaiser_beta ?? 6.0,
       }));
       const data = await simulate5G({
         towers: towersWithGlobals,
@@ -51,7 +49,7 @@ export default function FiveGPage() {
       if (e?.name !== "AbortError") console.warn("5G sim error:", e?.message);
     }
     if (!controller.signal.aborted) setLoading(false);
-  }, [globalSnr, globalWindow, globalBeta]);
+  }, [globalSnr]);
 
   useEffect(() => { runSim(towers, users); }, []);
 
@@ -59,7 +57,7 @@ export default function FiveGPage() {
   useEffect(() => {
     if (debRef.current) clearTimeout(debRef.current);
     debRef.current = setTimeout(() => runSim(towers, users), 400);
-  }, [towers, users, globalSnr, globalWindow, globalBeta]);
+  }, [towers, users, globalSnr]);
 
 
   // Keyboard
@@ -364,23 +362,26 @@ export default function FiveGPage() {
     setTowers(DEFAULT_TOWERS);
     setUsers(DEFAULT_USERS);
     setGlobalSnr(250);
-    setGlobalWindow("kaiser");
-    setGlobalBeta(6.0);
     setTimeout(() => runSim(DEFAULT_TOWERS, DEFAULT_USERS), 50);
   };
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 44px)", overflow: "hidden" }}>
-      {/* Top bar with SNR */}
-      <div className="flex items-center justify-end px-5 py-1.5" style={{ borderBottom: "1px solid #1a1f2e" }}>
-        <div className="snr-control">
-          <label>SNR</label>
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-green" />
-          <input type="range" min={0} max={1000} step={10} value={globalSnr}
-            onChange={e => setGlobalSnr(Number(e.target.value))} />
-          <span className="snr-value">{globalSnr}</span>
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-5 py-1.5" style={{ borderBottom: "1px solid #1a1f2e" }}>
+        <button onClick={resetAll}
+          className="rounded-md border border-border bg-bg-surface px-3 py-1 text-[11px] text-text-muted hover:text-text-primary hover:border-red-500/50 transition-colors">
+          ↺ Reset All
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="snr-control">
+            <label>SNR</label>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-green" />
+            <input type="range" min={0} max={1000} step={10} value={globalSnr}
+              onChange={e => setGlobalSnr(Number(e.target.value))} />
+            <span className="snr-value">{globalSnr}</span>
+          </div>
         </div>
-        <button className="ml-3 text-text-muted hover:text-text-secondary text-sm">⚙</button>
       </div>
 
       {/* Main content */}
@@ -444,43 +445,6 @@ export default function FiveGPage() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Global Parameters Bar */}
-      <div className="global-param-bar">
-        <div className="param-item">
-          <span className="param-label">Elements</span>
-          <span className="param-value">{towers[0]?.num_elements || 32}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Spacing (λ)</span>
-          <span className="param-value">{towers[0]?.element_spacing || 0.5}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Frequency</span>
-          <span className="param-value">{((towers[0]?.frequency || 28e9) / 1e9).toFixed(1)} GHz</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">SNR</span>
-          <span className="param-value">{globalSnr}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Window</span>
-          <select value={globalWindow} onChange={e => setGlobalWindow(e.target.value)}>
-            <option value="kaiser">Kaiser (β)</option>
-            <option value="hamming">Hamming</option>
-            <option value="hanning">Hanning</option>
-            <option value="blackman">Blackman</option>
-            <option value="rectangular">Rectangular</option>
-          </select>
-        </div>
-        <div className="param-item">
-          <span className="param-label">β</span>
-          <span className="param-value">{globalBeta.toFixed(1)}</span>
-          <input type="range" min={0} max={20} step={0.5} value={globalBeta}
-            onChange={e => setGlobalBeta(Number(e.target.value))} />
-        </div>
-        <button onClick={resetAll}>Reset All</button>
       </div>
     </div>
   );

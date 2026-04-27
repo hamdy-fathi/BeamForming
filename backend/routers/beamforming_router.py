@@ -13,9 +13,14 @@ router = APIRouter(prefix="/api/beamforming", tags=["Beamforming"])
 @router.post("/compute")
 async def compute_beamforming(req: BeamformingRequest):
     """Compute interference map and beam profile for given parameters."""
+    # Spacing slider is d/λ at a reference frequency.
+    # Changing frequency scales effective d/λ: higher f → narrower beam.
+    ref_freq = 1e9  # beamforming page default
+    effective_spacing = req.element_spacing * (req.frequency / ref_freq)
+
     sim = BeamformingSimulator(
         num_elements=req.num_elements,
-        element_spacing=req.element_spacing,
+        element_spacing=effective_spacing,
         frequency=req.frequency,
         steering_angle=req.steering_angle,
         phase_offset=req.phase_offset,
