@@ -1,15 +1,16 @@
 "use client";
 import { useRef, useEffect, useCallback } from "react";
 import type { Dispatch, SetStateAction, MouseEvent } from "react";
-import { Target, GT_SIZE, MAX_RANGE, MAX_TARGETS, polarToXY, xyToPolar } from "./helpers";
+import { Target, GT_SIZE, MAX_TARGETS, polarToXY, xyToPolar } from "./helpers";
 
 interface Props {
   targets: Target[];
   setTargets: Dispatch<SetStateAction<Target[]>>;
   onTargetsChanged: () => void;
+  maxRange: number;
 }
 
-export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }: Props) {
+export default function GroundTruthMap({ targets, setTargets, onTargetsChanged, maxRange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragging = useRef<number | null>(null);
   const cx = GT_SIZE / 2, cy = GT_SIZE / 2, r = GT_SIZE / 2 - 24;
@@ -35,7 +36,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
     // Range labels
     ctx.fillStyle = "#2a6faa"; ctx.font = "9px monospace"; ctx.textAlign = "center";
     for (let i = 1; i <= 5; i++) {
-      const km = (MAX_RANGE * i / 5 / 1000).toFixed(0);
+      const km = (maxRange * i / 5 / 1000).toFixed(0);
       ctx.fillText(`${km}km`, cx, cy - r * i / 5 + 12);
     }
 
@@ -55,7 +56,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
 
     // Targets
     targets.forEach((t, i) => {
-      const { x, y } = polarToXY(t.angle, t.distance, cx, cy, r, MAX_RANGE);
+      const { x, y } = polarToXY(t.angle, t.distance, cx, cy, r, maxRange);
       const sz = Math.max(5, t.size / 4);
 
       // Glow
@@ -73,7 +74,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
       ctx.fillStyle = "#60a5fa88"; ctx.font = "8px monospace";
       ctx.fillText(`${(t.distance/1000).toFixed(1)}km ${t.angle.toFixed(0)}°`, x, y + sz + 10);
     });
-  }, [targets]);
+  }, [targets, maxRange, cx, cy, r]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -85,7 +86,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
   const onMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
     const { mx, my } = getCanvasXY(e);
     for (let i = 0; i < targets.length; i++) {
-      const { x, y } = polarToXY(targets[i].angle, targets[i].distance, cx, cy, r, MAX_RANGE);
+      const { x, y } = polarToXY(targets[i].angle, targets[i].distance, cx, cy, r, maxRange);
       if (Math.sqrt((mx - x) ** 2 + (my - y) ** 2) < Math.max(5, targets[i].size / 4) + 10) {
         dragging.current = i; e.preventDefault(); return;
       }
@@ -95,7 +96,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
   const onMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
     if (dragging.current === null) return;
     const { mx, my } = getCanvasXY(e);
-    const polar = xyToPolar(mx, my, cx, cy, r, MAX_RANGE);
+    const polar = xyToPolar(mx, my, cx, cy, r, maxRange);
     if (!polar) return;
     const i = dragging.current;
     setTargets(prev => prev.map((t, idx) => idx === i ? { ...t, angle: Math.round(polar.angle), distance: Math.round(polar.distance) } : t));
@@ -106,7 +107,7 @@ export default function GroundTruthMap({ targets, setTargets, onTargetsChanged }
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {
     if (dragging.current !== null) return;
     const { mx, my } = getCanvasXY(e);
-    const polar = xyToPolar(mx, my, cx, cy, r, MAX_RANGE);
+    const polar = xyToPolar(mx, my, cx, cy, r, maxRange);
     if (!polar || targets.length >= MAX_TARGETS) return;
     setTargets(prev => [...prev, { id: prev.length, distance: Math.round(polar.distance), angle: Math.round(polar.angle), size: 20 }]);
     onTargetsChanged();

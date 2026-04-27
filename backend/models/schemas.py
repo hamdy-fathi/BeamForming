@@ -152,6 +152,7 @@ class RadarScanRequest(BaseModel):
     window_type:    WindowTypeEnum = WindowTypeEnum.HAMMING
     snr:            float = Field(200.0, ge=0,  le=1000)
     targets:        list[RadarTarget] = []
+    max_range:      float = Field(50000.0, gt=0)
 
 
 class RadarScanSectorRequest(BaseModel):
@@ -165,6 +166,7 @@ class RadarScanSectorRequest(BaseModel):
     window_type:    WindowTypeEnum = WindowTypeEnum.HAMMING
     snr:            float = Field(200.0, ge=0,  le=1000)
     targets:        list[RadarTarget] = []
+    max_range:      float = Field(50000.0, gt=0)
 
 
 class RadarDetectRequest(BaseModel):
@@ -173,19 +175,7 @@ class RadarDetectRequest(BaseModel):
     frequency:       float = Field(3e9,  gt=0)
     detection_threshold: float = Field(12.0, ge=0, le=100)
     targets:         list[RadarTarget] = []
-
-
-
-class RadarFullSweepRequest(BaseModel):
-    beam_width:      float = Field(10.0, ge=1,   le=90)
-    scan_speed:      float = Field(30.0, ge=1,   le=120)  # RPM
-    num_elements:    int   = Field(32,   ge=2,   le=128)
-    element_spacing: float = Field(0.5, ge=0.1, le=2.0)
-    frequency:       float = Field(3e9,  gt=0)
-    window_type:     WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr:             float = Field(200.0, ge=0,  le=1000)
-    detection_threshold: float = Field(12.0, ge=0, le=100)  # dB above noise
-    targets:         list[RadarTarget] = []
+    max_range:       float = Field(50000.0, gt=0)
 
 
 class RadarDetection(BaseModel):
@@ -199,14 +189,3 @@ class RadarDetection(BaseModel):
     uncertainty_size: float
     num_hits: int
 
-
-class RadarFullSweepResponse(BaseModel):
-    beam_width: float
-    scan_speed_rpm: float
-    num_steps: int
-    scan_time_seconds: float
-    ppi_data: list[dict]
-    range_max: float
-    detections: list[RadarDetection]
-    ground_truth: list[RadarTarget]
-    matched: list[dict]

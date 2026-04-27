@@ -1,17 +1,20 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { radarScanSector, radarDetect } from "@/lib/api";
-import { Target, Detection, MatchedDetection, DEFAULT_TARGETS, MAX_TARGETS } from "./helpers";
+import { radarScanSector, radarDetect, computeBeamforming } from "@/lib/api";
+import { Target, Detection, MatchedDetection, DEFAULT_TARGETS, MAX_TARGETS, DEFAULT_MAX_RANGE } from "./helpers";
 import GroundTruthMap from "./GroundTruthMap";
 import RadarPPI from "./RadarPPI";
 import DetectionTable from "./DetectionTable";
 
 export default function RadarPage() {
   const [targets, setTargets] = useState<Target[]>(DEFAULT_TARGETS);
-  const [beamWidth, setBeamWidth] = useState(10);
+  const [maxRange, setMaxRange] = useState(DEFAULT_MAX_RANGE);
+  const [computedBeamWidth, setComputedBeamWidth] = useState(10);
+  const [beamformingResult, setBeamformingResult] = useState<any>(null);
   const [scanSpeed, setScanSpeed] = useState(30);
   const [numElements, setNumElements] = useState(32);
   const [snr, setSnr] = useState(200);
+  const [frequency, setFrequency] = useState(3e9);
   const [windowType, setWindowType] = useState("hamming");
   const [detectionThreshold, setDetectionThreshold] = useState(12);
   const [ppiBuffer, setPpiBuffer] = useState<Array<{angle: number, returns: number[]}>>([]);
@@ -25,6 +28,33 @@ export default function RadarPage() {
   const lastScanAngleRef = useRef(0);
   const ppiBufferRef = useRef(ppiBuffer);
   ppiBufferRef.current = ppiBuffer;
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const computePhysics = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const data = await computeBeamforming({
+          num_elements: numElements,
+          element_spacing: 0.5,
+          frequency: frequency,
+          steering_angle: 0,
+          phase_offset: 0,
+          signal_type: "sine",
+          snr: snr,
+          window_type: windowType,
+          medium_speed: 3e8,
+          map_resolution: 300,
+        });
+        setBeamformingResult(data);
+        if (data?.parameters?.beamwidth_deg) {
+          setComputedBeamWidth(data.parameters.beamwidth_deg);
+        }
+      } catch (e) { console.error(e); }
+    }, 200);
+  }, [numElements, snr, windowType, frequency]);
+
+  useEffect(() => { computePhysics(); }, [computePhysics]);
 
   const handleScanToggle = useCallback(async () => {
     if (scanning) {
@@ -33,6 +63,13 @@ export default function RadarPage() {
     }
     setScanning(true);
   }, [scanning]);
+
+  // Clear buffer when maxRange changes to prevent scale mismatches
+  useEffect(() => {
+    setPpiBuffer([]);
+    setDetections([]);
+    setMatched([]);
+  }, [maxRange]);
 
   useEffect(() => {
     if (!scanning) {
@@ -54,15 +91,15 @@ export default function RadarPage() {
         const sectorData = await radarScanSector({
           start_angle: startAngle,
           end_angle: endAngle % 360,
-          step_angle: Math.max(1, beamWidth / 3),
-          beam_width: beamWidth,
+          step_angle: Math.max(1, computedBeamWidth / 3),
+          beam_width: computedBeamWidth,
           targets, num_elements: numElements, element_spacing: 0.5,
-          frequency: 3e9, window_type: windowType, snr
+          frequency: frequency, window_type: windowType, snr, max_range: maxRange
         });
         
         setPpiBuffer(prev => {
           const next = [...prev, ...sectorData];
-          const maxLen = Math.ceil(360 / Math.max(1, beamWidth / 3)) + 20;
+          const maxLen = Math.ceil(360 / Math.max(1, computedBeamWidth / 3)) + 20;
           return next.slice(-maxLen);
         });
       } catch(e) { console.error("radarScanSector error:", e); }
@@ -75,10 +112,11 @@ export default function RadarPage() {
       try {
         const d = await radarDetect({
           ppi_data: ppiBufferRef.current,
-          beam_width: beamWidth,
-          frequency: 3e9,
+          beam_width: computedBeamWidth,
+          frequency: frequency,
           detection_threshold: detectionThreshold,
-          targets
+          targets,
+          max_range: maxRange
         });
         setDetections(d.detections || []);
         setMatched(d.matched || []);
@@ -89,7 +127,7 @@ export default function RadarPage() {
       clearInterval(scanTimer);
       clearInterval(detectTimer);
     };
-  }, [scanning, scanSpeed, beamWidth, targets, numElements, windowType, snr, detectionThreshold]);
+  }, [scanning, scanSpeed, computedBeamWidth, targets, numElements, windowType, snr, detectionThreshold, maxRange, frequency]);
 
   const addTarget = () => {
     if (targets.length >= MAX_TARGETS) return;
@@ -116,7 +154,7 @@ export default function RadarPage() {
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr_320px] mb-4">
         {/* Ground Truth Map */}
         <div className="rounded-xl border border-blue-900/30 bg-bg-surface p-4">
-          <GroundTruthMap targets={targets} setTargets={setTargets} onTargetsChanged={() => {}} />
+          <GroundTruthMap targets={targets} setTargets={setTargets} onTargetsChanged={() => {}} maxRange={100000} />
         </div>
 
         {/* Radar PPI */}
@@ -126,9 +164,11 @@ export default function RadarPage() {
             detections={detections}
             scanning={scanning}
             scanSpeed={scanSpeed}
-            beamWidth={beamWidth}
+            beamWidth={computedBeamWidth}
             sweepAngle={sweepAngle}
             setSweepAngle={setSweepAngle}
+            maxRange={maxRange}
+            beamformingResult={beamformingResult}
           />
         </div>
 
@@ -145,9 +185,12 @@ export default function RadarPage() {
           <div className="rounded-xl border border-green-900/30 bg-bg-surface p-3 space-y-2.5">
             <h3 className="text-[10px] font-semibold uppercase tracking-wider text-green-400">Scan Parameters</h3>
             <div className="flex flex-col gap-0.5">
-              <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Beam Width</span><span className="font-mono text-green-400">{beamWidth}°</span></div>
-              <input type="range" min={1} max={90} value={beamWidth} onChange={e => setBeamWidth(Number(e.target.value))} />
-              <p className="text-[9px] text-text-muted">{beamWidth > 20 ? "Wide → fast but inaccurate" : beamWidth < 5 ? "Narrow → slow but precise" : "Balanced"}</p>
+              <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Computed Beam Width</span><span className="font-mono text-green-400">{computedBeamWidth.toFixed(1)}°</span></div>
+              <p className="text-[9px] text-text-muted">Determined by Elements & Window</p>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Max Range</span><span className="font-mono text-green-400">{(maxRange/1000).toFixed(0)} km</span></div>
+              <input type="range" min={10000} max={100000} step={10000} value={maxRange} onChange={e => setMaxRange(Number(e.target.value))} />
             </div>
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Scan Speed</span><span className="font-mono text-green-400">{scanSpeed} RPM</span></div>
@@ -156,6 +199,10 @@ export default function RadarPage() {
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Elements</span><span className="font-mono text-green-400">{numElements}</span></div>
               <input type="range" min={4} max={128} value={numElements} onChange={e => setNumElements(Number(e.target.value))} />
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <div className="flex justify-between text-[11px]"><span className="text-text-secondary">Frequency</span><span className="font-mono text-green-400">{(frequency/1e9).toFixed(1)} GHz</span></div>
+              <input type="range" min={1} max={10} step={0.1} value={frequency/1e9} onChange={e => setFrequency(Number(e.target.value) * 1e9)} />
             </div>
             <div className="flex flex-col gap-0.5">
               <div className="flex justify-between text-[11px]"><span className="text-text-secondary">SNR</span><span className="font-mono text-green-400">{snr}</span></div>
@@ -220,6 +267,7 @@ export default function RadarPage() {
         ppiBuffer={ppiBuffer}
         scanning={scanning}
       />
+
     </div>
   );
 }
