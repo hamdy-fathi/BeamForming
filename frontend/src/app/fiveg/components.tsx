@@ -15,7 +15,6 @@ export const DEFAULT_USERS = [
   { x: 450, y: 380 },
 ];
 
-export const DEFAULT_OBSTACLES: { id: number; x: number; y: number; width: number; height: number; reflection_loss_db: number }[] = [];
 
 /* ── Tower Param Row ─────────────────────────────────── */
 export function TowerParamRow({ label, value, min, max, step, unit, onChange, color }: {
@@ -222,19 +221,43 @@ export function TowerCard({ tower, tResult, index, updateParam, userPositions }:
           </div>
         </div>
 
-        {/* Mini polar — show user-beam when connected, primary beam when idle */}
+        {/* Mini polars — one per connected user beam, or primary beam when idle */}
         <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
-          <span className="text-[8px] text-text-muted">
-            {beams.length > 0
-              ? `Serving U${(beams[0]?.user_id ?? 0) + 1}`
-              : "Array Factor (dB)"}
-          </span>
-          <MiniPolar
-            profile={beams.length > 0 ? beams[0]?.beam_profile : profile}
-            color={color}
-            size={85}
-            targetDirDeg={realTargetDirDeg}
-          />
+          {beams.length > 0 ? beams.map((beam: any) => {
+            // Compute real direction for each beam's user
+            let dirDeg = tower.steering_angle ?? 0;
+            if (userPositions && tResult?.position) {
+              const uPos = userPositions?.[beam.user_id];
+              if (uPos) {
+                const dx = uPos.x - tResult.position.x;
+                const dy = uPos.y - tResult.position.y;
+                dirDeg = Math.atan2(dx, dy) * 180 / Math.PI;
+              }
+            }
+            return (
+              <div key={beam.user_id} className="flex flex-col items-center">
+                <span className="text-[8px] text-text-muted">
+                  Serving U{beam.user_id + 1}
+                </span>
+                <MiniPolar
+                  profile={beam.beam_profile}
+                  color={color}
+                  size={beams.length > 1 ? 65 : 85}
+                  targetDirDeg={dirDeg}
+                />
+              </div>
+            );
+          }) : (
+            <div className="flex flex-col items-center">
+              <span className="text-[8px] text-text-muted">Array Factor (dB)</span>
+              <MiniPolar
+                profile={profile}
+                color={color}
+                size={85}
+                targetDirDeg={realTargetDirDeg}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
