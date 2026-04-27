@@ -64,7 +64,7 @@ export default function FiveGPage() {
   useEffect(() => {
     if (debRef.current) clearTimeout(debRef.current);
     debRef.current = setTimeout(() => runSim(towers, users, obstacles), 400);
-  }, [towers, obstacles, globalSnr, globalWindow, globalBeta]);
+  }, [towers, users, obstacles, globalSnr, globalWindow, globalBeta]);
 
 
   // Keyboard
@@ -261,55 +261,68 @@ export default function FiveGPage() {
       towerResults.forEach((t: any, i: number) => {
         const tx = sx(t.position.x), ty = sy(t.position.y);
         const maxR = t.coverage_radius * scale;
+        const conns: any[] = t.connections || [];
         const beams: any[] = t.user_beams || [];
-        const beamsToDraw = beams.length > 0 ? beams : [{ beam_profile: t.beam_profile, steering_angle: 0 }];
 
-        beamsToDraw.forEach((beam: any) => {
-          const profile = beam.beam_profile;
-          if (!profile?.angles || !profile?.magnitudes_db) return;
-          const angles = profile.angles as number[];
-          const magsDb = profile.magnitudes_db as number[];
-          const uid = beam.user_id;
-          let canvasDir: number;
-          if (uid !== undefined && userResults[uid]) {
-            const u = userResults[uid];
-            canvasDir = Math.atan2(sy(u.position.y) - ty, sx(u.position.x) - tx);
+        // Choose profile + direction:
+        // - Connected → use user_beam profile, aim toward first connected user
+        // - Idle → use primary beam_profile, aim by manual steering slider
+        let profile: any;
+        let rotOff: number;
+
+        if (conns.length > 0 && beams.length > 0 && beams[0]?.beam_profile) {
+          // Connected: auto-steer toward first connected user
+          profile = beams[0].beam_profile;
+          const uid = beams[0].user_id;
+          const u = userResults[uid];
+          if (u) {
+            // Compute small correction: align profile peak to actual user screen direction
+            const dx = sx(u.position.x) - tx;
+            const dy = sy(u.position.y) - ty;
+            const userDirScreen = Math.atan2(dy, dx); // standard canvas: 0°=right
+            const steerRad = (beams[0].steering_angle || 0) * Math.PI / 180;
+            // Profile peak is at steerRad (backend convention). Its canvas pos = π/2 - steerRad
+            rotOff = userDirScreen - (Math.PI / 2 - steerRad);
           } else {
-            canvasDir = -Math.PI / 2;
+            rotOff = 0;
           }
-          const peakRad = (beam.steering_angle || 0) * Math.PI / 180;
-          const rotOff = canvasDir - peakRad;
+        } else {
+          // Idle: no correction needed
+          profile = t.beam_profile;
+          rotOff = 0;
+        }
 
-          // Convert dB to linear amplitude for smooth lobes
-          const amps = magsDb.map((db: number) => {
-            const clamped = Math.max(-40, Math.min(0, db));
-            return Math.pow(10, clamped / 20);
-          });
+        if (!profile?.angles || !profile?.magnitudes_db) return;
+        const angles = profile.angles as number[];
+        const magsDb = profile.magnitudes_db as number[];
 
-          // Front half: -90° to +90° rotated by rotOff
-          ctx.beginPath();
-          for (let j = 0; j < angles.length; j++) {
-            const amp = amps[j];
-            const r = viz.sidelobes ? amp * maxR : (amp > 0.5 ? amp * maxR : amp * maxR * 0.1);
-            const ca = angles[j] * Math.PI / 180 + rotOff;
-            const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
-            j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-          }
-          // Mirror: back half (reflected, attenuated)
-          for (let j = angles.length - 1; j >= 0; j--) {
-            const r = amps[j] * maxR * 0.08;
-            const ca = angles[j] * Math.PI / 180 + rotOff + Math.PI;
-            const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
-            ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-          const grad = ctx.createRadialGradient(tx, ty, 0, tx, ty, maxR);
-          grad.addColorStop(0, TOWER_COLORS[i] + "30");
-          grad.addColorStop(0.5, TOWER_COLORS[i] + "18");
-          grad.addColorStop(1, TOWER_COLORS[i] + "05");
-          ctx.fillStyle = grad; ctx.fill();
-          ctx.strokeStyle = TOWER_COLORS[i] + "55"; ctx.lineWidth = 1; ctx.stroke();
+        const amps = magsDb.map((db: number) => {
+          const clamped = Math.max(-40, Math.min(0, db));
+          return Math.pow(10, clamped / 20);
         });
+
+        ctx.beginPath();
+        for (let j = 0; j < angles.length; j++) {
+          const amp = amps[j];
+          const r = viz.sidelobes ? amp * maxR : (amp > 0.5 ? amp * maxR : amp * maxR * 0.1);
+          // Backend angles: atan2(dx,dy) convention. Convert to canvas cos/sin: negate + π/2
+          const ca = Math.PI / 2 - angles[j] * Math.PI / 180 + rotOff;
+          const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
+          j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        for (let j = angles.length - 1; j >= 0; j--) {
+          const r = amps[j] * maxR * 0.08;
+          const ca = Math.PI / 2 - angles[j] * Math.PI / 180 + rotOff + Math.PI;
+          const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
+          ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        const grad = ctx.createRadialGradient(tx, ty, 0, tx, ty, maxR);
+        grad.addColorStop(0, TOWER_COLORS[i] + "30");
+        grad.addColorStop(0.5, TOWER_COLORS[i] + "18");
+        grad.addColorStop(1, TOWER_COLORS[i] + "05");
+        ctx.fillStyle = grad; ctx.fill();
+        ctx.strokeStyle = TOWER_COLORS[i] + "55"; ctx.lineWidth = 1; ctx.stroke();
       });
     }
 
@@ -543,7 +556,8 @@ export default function FiveGPage() {
             <div className="space-y-3">
               {towers.map((tower, i) => (
                 <TowerCard key={i} tower={tower} tResult={(result?.towers || [])[i]}
-                  index={i} updateParam={updateTowerParam} />
+                  index={i} updateParam={updateTowerParam}
+                  userPositions={users.map(u => ({x: u.x, y: u.y}))} />
               ))}
             </div>
           </div>

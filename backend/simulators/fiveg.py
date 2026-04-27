@@ -300,6 +300,12 @@ class FiveGSimulator:
         mag = np.abs(af[0])
         return 20.0 * np.log10(max(mag, 1e-30))
 
+    def _peak_gain_db(self, sim: BeamformingSimulator) -> float:
+        """Peak array gain (as if auto-steered to user). Uses steering angle = peak."""
+        af = sim.array_factor(np.array([sim.steering_angle_deg]))
+        mag = np.abs(af[0])
+        return 20.0 * np.log10(max(mag, 1e-30))
+
     def _compute_beamwidth_deg(self, sim: BeamformingSimulator) -> float:
         """Compute the -3dB beamwidth from the beam profile."""
         profile = sim.beam_profile(num_points=361)
@@ -327,7 +333,7 @@ class FiveGSimulator:
         angle_to_user = _canvas_angle_to_user(tower_pos, user_pos)
 
         if not los_blocked:
-            array_gain = self._array_gain_db(sim, angle_to_user)
+            array_gain = self._peak_gain_db(sim)
             fspl = free_space_path_loss(max(dist, 1.0), freq)
             signal_dbm = power_dbm + array_gain - fspl
             path_powers_linear.append(10 ** (signal_dbm / 10))
@@ -347,7 +353,7 @@ class FiveGSimulator:
         refl_paths = _find_reflection_paths(tower_pos, user_pos, self.obstacles)
         for rp in refl_paths:
             angle_at_tower = rp["angle_at_tower"]
-            array_gain = self._array_gain_db(sim, angle_at_tower)
+            array_gain = self._peak_gain_db(sim)
             fspl = free_space_path_loss(max(rp["total_distance"], 1.0), freq)
             signal_dbm = power_dbm + array_gain - fspl - rp["reflection_loss_db"]
             path_powers_linear.append(10 ** (signal_dbm / 10))
@@ -368,7 +374,7 @@ class FiveGSimulator:
         diff_paths = _find_diffraction_paths(tower_pos, user_pos, self.obstacles)
         for dp in diff_paths:
             angle_at_tower = dp["angle_at_tower"]
-            array_gain = self._array_gain_db(sim, angle_at_tower)
+            array_gain = self._peak_gain_db(sim)
             fspl = free_space_path_loss(max(dp["total_distance"], 1.0), freq)
             signal_dbm = power_dbm + array_gain - fspl - dp["reflection_loss_db"]
             path_powers_linear.append(10 ** (signal_dbm / 10))
@@ -406,7 +412,10 @@ class FiveGSimulator:
             "signal_strengths": {},
         } for u in self.users]
 
-        # ── Determine connectivity ──
+        # ── Phase 1: Compute signal for all tower-user pairs ──
+        # user_best[uid] = (best_signal_dbm, best_tower_id)
+        user_best: dict[int, tuple[float, int]] = {}
+
         for t in self.towers:
             sim = t["simulator"]
             power_dbm = t["power_dbm"]
@@ -419,7 +428,13 @@ class FiveGSimulator:
                     sim, power_dbm, t["position"], u["position"])
 
                 if total_signal > -100:
-                    t["connected_users"].append(u["id"])
+                    uid = u["id"]
+                    if uid not in user_best or total_signal > user_best[uid][0]:
+                        user_best[uid] = (total_signal, t["id"])
+
+        # ── Phase 2: Assign each user to their single best tower ──
+        for uid, (_, best_tid) in user_best.items():
+            self.towers[best_tid]["connected_users"].append(uid)
 
         # ── Compute per-tower results ──
         tower_results = []
