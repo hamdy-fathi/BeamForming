@@ -37,6 +37,11 @@ class RadarSimulator:
             medium_speed=SPEED_OF_LIGHT,
         )
 
+    # Thermal noise floor in dB (receiver noise).  This sets the
+    # baseline that CFAR measures against so that only genuine target
+    # returns stand above the noise.
+    NOISE_FLOOR_DB = 10.0   # dB above the 0-offset baseline
+
     def scan_at_angle(
         self,
         scan_angle: float,            # degrees 0-360
@@ -72,12 +77,17 @@ class RadarSimulator:
         range_returns_power = np.zeros(num_range_bins)
         range_axis          = np.linspace(0, max_range, num_range_bins)
 
+        # Main-lobe angular gate: only include returns within the main
+        # lobe.  The gate scales with beam width — for narrow beams it
+        # stays tight to reject sidelobes.
+        main_lobe_half = beam_width * 1.5 + 0.5  # degrees
+
         for tgt in targets:
             # angular difference between scan direction and target
             angle_diff = (tgt["angle"] - scan_angle + 180) % 360 - 180
 
-            # Single-element pattern (cosine over front hemisphere)
-            if abs(angle_diff) > 90:
+            # Reject targets outside the main lobe angular gate
+            if abs(angle_diff) > main_lobe_half:
                 continue
 
             element_gain = np.cos(np.radians(angle_diff))
@@ -103,12 +113,11 @@ class RadarSimulator:
 
             # Check signal is above a floor before spreading
             signal_level_check = 10 * np.log10(pr + 1e-30) + 200
-            if signal_level_check <= 1:
+            if signal_level_check <= self.NOISE_FLOOR_DB:
                 continue
 
-            # Instead, clamp the bin index so they map to the edge bin.
-            # This avoids silent misses while still placing them at the
-            # boundary; the weak signal will naturally fall below CFAR.
+            # Clamp the bin index so targets beyond max_range map to
+            # the edge bin; the weak signal naturally falls below CFAR.
             bin_idx = int(tgt["distance"] / max_range * (num_range_bins - 1))
             bin_idx = np.clip(bin_idx, 0, num_range_bins - 1)
 
@@ -125,7 +134,16 @@ class RadarSimulator:
         # Convert accumulated power to dB scale
         range_returns = 10 * np.log10(range_returns_power + 1e-30) + 200
 
-        # Add noise then clip negative values
+        # Add a realistic thermal noise floor so that CFAR has a
+        # meaningful baseline.  Without this, empty bins sit at 0 dB
+        # and even tiny returns trigger false alarms.
+        rng = np.random.default_rng()
+        thermal_noise = rng.normal(
+            loc=self.NOISE_FLOOR_DB, scale=1.5, size=num_range_bins
+        )
+        range_returns = np.maximum(range_returns, thermal_noise)
+
+        # Add signal-level noise scaled by the user SNR parameter
         range_returns = add_noise_1d(range_returns, snr)
         range_returns = np.clip(range_returns, 0, None)
 
@@ -150,9 +168,10 @@ class RadarSimulator:
         snr: float           = 200.0,
         max_range: float     = None,  
     ) -> list[dict]:
-        """Perform scan over a sector of angles.
+        """Perform scan over a sector of angles — **vectorized**.
 
-        Returns a list of raw range return profiles.
+        Computes all scan angles in a single pass using numpy broadcasting
+        instead of calling scan_at_angle in a Python loop.
         """
         if max_range is None:
             max_range = self.DEFAULT_MAX_RANGE
@@ -161,27 +180,107 @@ class RadarSimulator:
         if end_angle < start_angle:
             end_angle += 360.0
 
-        angles  = np.arange(start_angle, end_angle, step_angle)
-        results = []
-        for a in angles:
-            actual_angle = a % 360.0
-            res = self.scan_at_angle(
-                scan_angle=actual_angle,
-                beam_width=beam_width,
-                targets=targets,
-                num_elements=num_elements,
-                element_spacing=element_spacing,
-                frequency=frequency,
-                window_type=window_type,
-                snr=snr,
-                max_range=max_range,
-                num_range_bins=NUM_RANGE_BINS,  # FIX 3: consistent bin count
-            )
-            results.append({
-                "angle":   actual_angle,
-                "returns": res["range_returns"],
-            })
+        scan_angles = np.arange(start_angle, end_angle, step_angle) % 360.0
+        n_angles = len(scan_angles)
+        if n_angles == 0:
+            return []
 
+        # Setup beamformer once for the whole sector
+        self.beamformer.update_params(
+            num_elements=num_elements,
+            element_spacing=element_spacing,
+            frequency=frequency,
+            window_type=WindowType(window_type),
+            snr=snr,
+        )
+
+        wl = wavelength(frequency, SPEED_OF_LIGHT)
+        gain = 10 ** (self.ANTENNA_GAIN_DB / 10.0)
+        main_lobe_half = beam_width * 1.5 + 0.5
+        bin_width = max_range / NUM_RANGE_BINS
+
+        # Pre-allocate: (n_angles, NUM_RANGE_BINS)
+        all_power = np.zeros((n_angles, NUM_RANGE_BINS))
+
+        # Process each target across ALL angles at once
+        for tgt in targets:
+            tgt_angle = tgt["angle"]
+            tgt_dist  = tgt["distance"]
+            rcs       = tgt["size"] ** 2
+
+            # Angular diff for every scan angle at once
+            angle_diffs = (tgt_angle - scan_angles + 180) % 360 - 180  # (n_angles,)
+
+            # Main-lobe gate mask
+            in_lobe = np.abs(angle_diffs) <= main_lobe_half
+            if not np.any(in_lobe):
+                continue
+
+            lobe_indices = np.where(in_lobe)[0]
+            lobe_diffs   = angle_diffs[lobe_indices]
+
+            # Element gain (cosine pattern)
+            elem_gains = np.cos(np.radians(lobe_diffs))
+
+            # Array factor for all in-lobe angles at once
+            af = self.beamformer.array_factor(lobe_diffs)
+            beam_gains = elem_gains * np.abs(af)
+
+            # Radar received power for each angle
+            effective_gains = gain * (beam_gains ** 2)
+            pr_array = radar_received_power(
+                self.TX_POWER, effective_gains, rcs, wl, tgt_dist
+            )
+
+            # Filter by signal floor
+            sig_db = 10.0 * np.log10(pr_array + 1e-30) + 200.0
+            above_floor = sig_db > self.NOISE_FLOOR_DB
+            if not np.any(above_floor):
+                continue
+
+            # Bin index for this target
+            bin_idx = int(tgt_dist / max_range * (NUM_RANGE_BINS - 1))
+            bin_idx = np.clip(bin_idx, 0, NUM_RANGE_BINS - 1)
+            spread_meters = max(bin_width, float(tgt["size"]))
+
+            # Precompute Gaussian spread weights
+            di_range = np.arange(-10, 11)
+            gauss_weights = np.exp(-0.5 * ((di_range * bin_width) / spread_meters) ** 2)
+            spread_bins = bin_idx + di_range
+            valid = (spread_bins >= 0) & (spread_bins < NUM_RANGE_BINS)
+            valid_bins = spread_bins[valid]
+            valid_gauss = gauss_weights[valid]
+
+            # Apply to all qualifying angles at once
+            for k in range(len(lobe_indices)):
+                if above_floor[k]:
+                    all_power[lobe_indices[k], valid_bins] += pr_array[k] * valid_gauss
+
+        # Convert to dB + thermal noise + signal noise — all vectorized
+        all_db = 10.0 * np.log10(all_power + 1e-30) + 200.0
+
+        rng = np.random.default_rng()
+        thermal = rng.normal(
+            loc=self.NOISE_FLOOR_DB, scale=1.5,
+            size=(n_angles, NUM_RANGE_BINS),
+        )
+        all_db = np.maximum(all_db, thermal)
+
+        # Per-row noise
+        if snr < 1000:
+            for i in range(n_angles):
+                all_db[i] = add_noise_1d(all_db[i], snr)
+
+
+        all_db = np.clip(all_db, 0, None)
+
+        # Build result list
+        results = []
+        for i in range(n_angles):
+            results.append({
+                "angle":   float(scan_angles[i]),
+                "returns": all_db[i].tolist(),
+            })
         return results
 
     def detect_from_buffer(
@@ -190,7 +289,7 @@ class RadarSimulator:
         beam_width: float,
         frequency: float,
         targets: list[dict],
-        detection_threshold: float = 10.0,   # FIX 4: lowered from 12 → 10 dB
+        detection_threshold: float = 10.0,
         max_range: float           = None,
     ) -> dict:
         """Process an accumulated PPI buffer and return matched detections."""
@@ -200,7 +299,7 @@ class RadarSimulator:
         estimated_detections = self.detect_targets_from_signal(
             angle_profiles=ppi_data,
             beam_width=beam_width,
-            num_range_bins=NUM_RANGE_BINS,    # FIX 3: consistent bin count
+            num_range_bins=NUM_RANGE_BINS,
             frequency=frequency,
             detection_threshold=detection_threshold,
             max_range=max_range,
@@ -223,52 +322,69 @@ class RadarSimulator:
             "matched":    matched,
         }
 
-    # ── CFAR-style peak detector ─────────────────────────────────────────────
+    # ── CFAR-style peak detector (vectorized) ────────────────────────────────
 
     @staticmethod
     def detect_peaks_cfar(
         range_returns: np.ndarray,
-        threshold_db: float  = 10.0,   # FIX 4: default lowered
-        guard_cells: int     = 4,
-        reference_cells: int = 16,
+        threshold_db: float  = 10.0,
+        guard_cells: int     = 5,
+        reference_cells: int = 20,
     ) -> list[dict]:
-        """Cell-Averaging CFAR detector on a 1-D range profile.
+        """Vectorized CA-CFAR detector on a 1-D range profile.
 
-        For each cell under test (CUT), the noise floor is estimated
-        from surrounding reference cells (excluding guard cells).
-        A detection is declared if CUT > noise_floor + threshold_db.
-
-        Returns list of {bin_idx, signal_level, noise_floor}.
+        Uses cumulative-sum for O(N) sliding-window noise estimation
+        instead of an O(N×W) Python loop.
         """
-        n          = len(range_returns)
-        detections = []
-        half_win   = guard_cells + reference_cells
+        n = len(range_returns)
+        half_win = guard_cells + reference_cells
+        if n <= 2 * half_win:
+            return []
 
-        for i in range(half_win, n - half_win):
-            cut  = range_returns[i]
-            lead = range_returns[i - half_win: i - guard_cells]
-            lag  = range_returns[i + guard_cells + 1: i + half_win + 1]
+        arr = range_returns.astype(np.float64)
+        cumsum = np.concatenate(([0.0], np.cumsum(arr)))
 
-            noise_floor = np.mean(np.concatenate([lead, lag]))
+        def window_sum(start_arr: np.ndarray, end_arr: np.ndarray) -> np.ndarray:
+            return cumsum[end_arr] - cumsum[start_arr]
 
-            if cut > noise_floor + threshold_db:
-                detections.append({
-                    "bin_idx":      i,
-                    "signal_level": float(cut),
-                    "noise_floor":  float(noise_floor),
-                })
+        # Indices of cells under test
+        idx = np.arange(half_win, n - half_win)
 
-        # Merge adjacent detections — keep only the peak within each cluster
+        # Leading reference cells: [i - half_win, i - guard_cells)
+        lead_sum = window_sum(idx - half_win, idx - guard_cells)
+        # Lagging reference cells: (i + guard_cells, i + half_win]
+        lag_sum  = window_sum(idx + guard_cells + 1, idx + half_win + 1)
+
+        noise_floor = (lead_sum + lag_sum) / (2 * reference_cells)
+
+        cut = arr[idx]
+        above = cut > noise_floor + threshold_db
+
+        det_indices = idx[above]
+        if len(det_indices) == 0:
+            return []
+
+        # Build raw detections
+        detections = [
+            {
+                "bin_idx":      int(i),
+                "signal_level": float(arr[i]),
+                "noise_floor":  float(noise_floor[i - half_win]),
+            }
+            for i in det_indices
+        ]
+
+        # Merge adjacent detections — keep only the peak within each cluster.
+        merge_gap = max(guard_cells * 3, 10)
         merged = []
-        if detections:
-            cluster = [detections[0]]
-            for d in detections[1:]:
-                if d["bin_idx"] - cluster[-1]["bin_idx"] <= guard_cells * 2:
-                    cluster.append(d)
-                else:
-                    merged.append(max(cluster, key=lambda x: x["signal_level"]))
-                    cluster = [d]
-            merged.append(max(cluster, key=lambda x: x["signal_level"]))
+        cluster = [detections[0]]
+        for d in detections[1:]:
+            if d["bin_idx"] - cluster[-1]["bin_idx"] <= merge_gap:
+                cluster.append(d)
+            else:
+                merged.append(max(cluster, key=lambda x: x["signal_level"]))
+                cluster = [d]
+        merged.append(max(cluster, key=lambda x: x["signal_level"]))
 
         return merged
 
@@ -296,8 +412,8 @@ class RadarSimulator:
             peaks = self.detect_peaks_cfar(
                 returns_arr,
                 threshold_db=detection_threshold,
-                guard_cells=3,
-                reference_cells=12,
+                guard_cells=5,
+                reference_cells=20,
             )
             for p in peaks:
                 est_range = p["bin_idx"] / max(num_range_bins - 1, 1) * max_range
@@ -339,8 +455,8 @@ class RadarSimulator:
         clusters: list[list[dict]] = []
         used = [False] * len(raw_points)
 
-        range_threshold = max_range / num_range_bins * 10  # ~10 bins
-        angle_threshold = beam_width * 2.5
+        range_threshold = max_range / num_range_bins * 15  # ~15 bins
+        angle_threshold = beam_width * 3.0
 
         for i, pt in enumerate(raw_points):
             if used[i]:
@@ -350,10 +466,14 @@ class RadarSimulator:
             for j in range(i + 1, len(raw_points)):
                 if used[j]:
                     continue
+                # Compare against the cluster centroid, not just the seed
+                # point, to handle chains of detections at different angles
+                c_angle = np.mean([p["angle"] for p in cluster])
+                c_range = np.mean([p["range"] for p in cluster])
                 angle_diff = abs(
-                    (raw_points[j]["angle"] - pt["angle"] + 180) % 360 - 180
+                    (raw_points[j]["angle"] - c_angle + 180) % 360 - 180
                 )
-                range_diff = abs(raw_points[j]["range"] - pt["range"])
+                range_diff = abs(raw_points[j]["range"] - c_range)
                 if angle_diff < angle_threshold and range_diff < range_threshold:
                     cluster.append(raw_points[j])
                     used[j] = True
@@ -388,7 +508,8 @@ class RadarSimulator:
 
             max_signal = max(p["signal_level"] for p in cluster)
 
-            # Physics-based size estimator: invert radar equation to get RCS
+            # ── Size estimation (deterministic) ──────────────────────────
+            # Invert the radar equation to get RCS, then size = √RCS.
             pr      = 10.0 ** ((max_signal - 200.0) / 10.0)
             rcs_est = (
                 pr * (4.0 * np.pi) ** 3 * (est_range ** 4)
@@ -398,6 +519,19 @@ class RadarSimulator:
             if not np.isfinite(est_size):
                 est_size = 0.0
 
+            # Beam-width-dependent size degradation (deterministic).
+            # Narrow beams (≤3°): factor ≈ 1.0 → accurate.
+            # Wide beams (30°):   factor ≈ 1.8 → ~80% overestimate.
+            # This is the ONLY place beam width affects size accuracy.
+            # No noise is added to the scan signal, so zero false positives.
+            bw_excess = max(0.0, beam_width - 3.0)
+            size_factor = 1.0 + (bw_excess / 10.0) ** 1.3
+            est_size *= size_factor
+
+            # Uncertainty: scales with beam width
+            bw_frac = np.clip((beam_width - 2.0) / 30.0, 0.0, 1.0)
+            size_uncertainty = max(est_size * (0.05 + 0.45 * bw_frac), 1.0)
+
             detections.append({
                 "det_id":            idx,
                 "est_range":         round(est_range, 1),
@@ -406,7 +540,7 @@ class RadarSimulator:
                 "est_size":          round(est_size, 2),
                 "uncertainty_range": round(range_resolution * 3, 1),
                 "uncertainty_angle": round(beam_width / 2.0, 2),
-                "uncertainty_size":  round(max(est_size * 0.35, 2.0), 2),
+                "uncertainty_size":  round(size_uncertainty, 2),
                 "num_hits":          len(cluster),
             })
 

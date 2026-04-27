@@ -77,10 +77,10 @@ export default function RadarPPI({
     ctx.fillText("0°", cx, 16); ctx.fillText("180°", cx, PPI_SIZE - 6);
     ctx.fillText("90°", PPI_SIZE - 10, cy + 4); ctx.fillText("270°", 14, cy + 4);
     for (let i = 1; i <= 5; i++) {
-      const km = (100000 * i / 5 / 1000).toFixed(0);
+      const km = (maxRange * i / 5 / 1000).toFixed(0);
       ctx.fillText(`${km}`, cx + 14, cy - r * i / 5 + 4);
     }
-  }, [cx, cy, r]);
+  }, [cx, cy, r, maxRange]);
 
   // Static draw (idle scope only: no pre-revealed detections)
   const drawStatic = useCallback(() => {
@@ -102,7 +102,7 @@ export default function RadarPPI({
         const db = Math.max(-60, magnitudes_db[i]);
         const intensity = Math.pow(10, db / 20);
         const a = (sweepAngle + localAngle) * Math.PI / 180 - Math.PI / 2;
-        const dist = intensity * r * (maxRange / 100000);
+        const dist = intensity * r;
         ctx.lineTo(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist);
       }
       ctx.closePath();
@@ -216,7 +216,7 @@ export default function RadarPPI({
           const a = closest.angle * Math.PI / 180 - Math.PI / 2;
           closest.returns.forEach((v: number, i: number) => {
             if (v > 5) {
-              const dist = i / closest.returns.length * r * (maxRange / 100000);
+              const dist = i / closest.returns.length * r;
               const intensity = Math.min(1, v / 100);
               ctx.fillStyle = `rgba(74,222,128,${intensity})`;
               ctx.fillRect(cx + Math.cos(a) * dist - 1, cy + Math.sin(a) * dist - 1, 3, 3);
@@ -235,7 +235,7 @@ export default function RadarPPI({
           const db = Math.max(-60, magnitudes_db[i]);
           const intensity = Math.pow(10, db / 20);
           const a = (angle + localAngle) * Math.PI / 180 - Math.PI / 2;
-          const dist = intensity * r * (maxRange / 100000);
+          const dist = intensity * r;
           ctx.lineTo(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist);
         }
         ctx.closePath();
@@ -264,8 +264,8 @@ export default function RadarPPI({
         drawLabels(vctx);
         // Draw detection markers on visible canvas
         revealedRef.current.forEach((d) => {
-          const { x, y } = polarToXY(d.est_angle, d.est_range, cx, cy, r, 100000);
-          const ur = d.uncertainty_range / 100000 * r;
+          const { x, y } = polarToXY(d.est_angle, d.est_range, cx, cy, r, maxRange);
+          const ur = d.uncertainty_range / maxRange * r;
           vctx.strokeStyle = "rgba(245,158,11,0.5)"; vctx.lineWidth = 1;
           vctx.setLineDash([4, 3]); vctx.beginPath(); vctx.arc(x, y, Math.max(ur, 6), 0, Math.PI * 2); vctx.stroke();
           vctx.setLineDash([]);

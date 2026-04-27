@@ -7,6 +7,8 @@ interface Props {
   numDetections: number;
   ppiBuffer: Array<{ angle: number; returns: number[] }>;
   scanning: boolean;
+  beamWidth?: number;
+  scanMode?: "custom" | "broad" | "narrow";
 }
 
 /**
@@ -24,6 +26,8 @@ export default function DetectionTable({
   numDetections,
   ppiBuffer,
   scanning,
+  beamWidth,
+  scanMode,
 }: Props) {
   // Persistent memory: target_id → last known MatchedDetection
   const memoryRef = useRef<Map<number, MatchedDetection & { everScanned: boolean }>>(
@@ -91,6 +95,13 @@ export default function DetectionTable({
         detected.length
       ).toFixed(1)
       : "—";
+  const avgSizeErr =
+    detected.filter(m => m.size_error != null).length > 0
+      ? (
+        detected.filter(m => m.size_error != null).reduce((s, m) => s + Math.abs(m.size_error!), 0) /
+        detected.filter(m => m.size_error != null).length
+      ).toFixed(1)
+      : "—";
 
   // Row status label
   const statusCell = (m: MatchedDetection & { everScanned: boolean }) => {
@@ -121,11 +132,32 @@ export default function DetectionTable({
             <span className="text-cyan-400 font-mono">{avgAngleErr}°</span>
           </span>
           <span className="text-text-muted">
+            Avg Size Error:{" "}
+            <span className="text-cyan-400 font-mono">{avgSizeErr} m</span>
+          </span>
+          <span className="text-text-muted">
             Raw Detections:{" "}
             <span className="text-green-400 font-mono">{numDetections}</span>
           </span>
         </div>
       </div>
+
+      {/* Beam width accuracy banner */}
+      {beamWidth != null && (
+        <div className={`mb-3 rounded-lg p-2.5 text-[10px] flex items-center gap-3 border ${
+          scanMode === "broad" ? "bg-amber-500/10 border-amber-500/20 text-amber-300" :
+          scanMode === "narrow" ? "bg-cyan-500/10 border-cyan-500/20 text-cyan-300" :
+          "bg-bg-elevated border-border text-text-muted"
+        }`}>
+          <span className="font-semibold">Beam: {beamWidth.toFixed(1)}°</span>
+          <span>·</span>
+          <span>{beamWidth > 15 ? "⚡ Fast scan — size estimates are rough" :
+                 beamWidth < 6 ? "🎯 High precision — size estimates are accurate" :
+                 "⚖️ Balanced — moderate accuracy"}</span>
+          {scanMode === "broad" && <span className="ml-auto text-[9px] opacity-70">Tip: Switch to Narrow Scan to refine sizes</span>}
+          {scanMode === "narrow" && <span className="ml-auto text-[9px] opacity-70">Tip: Use Broad Scan first to find all targets</span>}
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
