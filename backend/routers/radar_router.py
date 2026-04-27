@@ -5,8 +5,6 @@
 from fastapi import APIRouter
 from models.schemas import (
     RadarScanRequest,
-    RadarFullSweepRequest,
-    RadarFullSweepResponse,
     RadarScanSectorRequest,
     RadarDetectRequest,
 )
@@ -30,6 +28,7 @@ async def single_scan(req: RadarScanRequest):
         frequency=req.frequency,
         window_type=req.window_type.value,
         snr=req.snr,
+        max_range=req.max_range,
     )
 
 
@@ -48,6 +47,7 @@ async def scan_sector(req: RadarScanSectorRequest):
         frequency=req.frequency,
         window_type=req.window_type.value,
         snr=req.snr,
+        max_range=req.max_range,
     )
 
 
@@ -61,24 +61,5 @@ async def detect(req: RadarDetectRequest):
         frequency=req.frequency,
         targets=targets,
         detection_threshold=req.detection_threshold,
-    )
-
-
-@router.post("/full-sweep", response_model=RadarFullSweepResponse)
-async def full_sweep(req: RadarFullSweepRequest):
-    """Complete 360° radar sweep with blind detection.
-
-    Returns PPI data, estimated detections, and ground truth for comparison.
-    """
-    targets = [t.model_dump() for t in req.targets]
-    return _sim.full_sweep(
-        beam_width=req.beam_width,
-        scan_speed_rpm=req.scan_speed,
-        targets=targets,
-        num_elements=req.num_elements,
-        element_spacing=req.element_spacing,
-        frequency=req.frequency,
-        window_type=req.window_type.value,
-        snr=req.snr,
-        detection_threshold=req.detection_threshold,
+        max_range=req.max_range,
     )

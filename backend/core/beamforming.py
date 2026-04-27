@@ -87,8 +87,8 @@ class BeamformingSimulator:
 
         # weighted sum
         af = np.sum(self.weights[None, :] * np.exp(1j * n[None, :] * psi), axis=1)
-        # normalise
-        af /= (np.max(np.abs(af)) + 1e-30)
+        # normalise by the theoretical maximum (which is the sum of the weights)
+        af /= (np.sum(self.weights) + 1e-30)
         return af
 
     def beam_profile(self, num_points: int = 361) -> dict:
@@ -204,6 +204,22 @@ class BeamformingSimulator:
         imap = self.interference_map(resolution=map_resolution)
         window_weights = self.weights.tolist()
 
+        # Compute noise-free beamwidth
+        angles = np.linspace(-90, 90, 361)
+        af = self.array_factor(angles)
+        mag_db_clean = 20.0 * np.log10(np.abs(af) + 1e-30)
+        peak_idx = np.argmax(mag_db_clean)
+        peak_db = mag_db_clean[peak_idx]
+        
+        left_idx = peak_idx
+        while left_idx > 0 and mag_db_clean[left_idx - 1] >= peak_db - 3:
+            left_idx -= 1
+        right_idx = peak_idx
+        while right_idx < len(mag_db_clean) - 1 and mag_db_clean[right_idx + 1] >= peak_db - 3:
+            right_idx += 1
+            
+        beamwidth_deg = float(angles[right_idx] - angles[left_idx])
+
         return {
             "beam_profile": profile,
             "interference_map": imap,
@@ -219,5 +235,6 @@ class BeamformingSimulator:
                 "window_type": self.window_type.value,
                 "wavelength": self.wavelength,
                 "medium_speed": self.medium_speed,
+                "beamwidth_deg": max(1.0, beamwidth_deg),
             },
         }
