@@ -374,8 +374,8 @@ export default function BeamformingPage() {
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.scale(dpr, dpr);
-    const cx = W / 2, cy = H / 2;
-    const maxR = W / 2 - 20;
+    const cx = W / 2, cy = H - 30;  // center at bottom for half-plane polar
+    const maxR = Math.min(W / 2 - 20, H - 50);
 
     ctx.fillStyle = "#080c14";
     ctx.fillRect(0, 0, W, H);

@@ -68,21 +68,23 @@ export default function Navbar() {
       className="sticky top-0 z-50 bg-[#080c14]/95 backdrop-blur-md"
       style={{ borderBottom: "1px solid #1a1f2e" }}
     >
-      <div className="mx-auto flex h-11 max-w-screen-2xl items-center px-5 gap-6">
-        {/* Brand */}
-        <Link href="/" className="flex items-baseline gap-1.5 shrink-0">
-          <span className="text-sm font-bold text-text-primary tracking-tight">
-            BeamSim{pageLabel ? ` ${pageLabel}` : ""}
-          </span>
-          {pageLabel && (
-            <span className="text-[10px] text-text-muted hidden sm:inline">
-              2D Beamforming Simulator
+      <div className="mx-auto flex h-11 max-w-screen-2xl items-center px-5">
+        {/* Brand — flex-1 to balance with settings */}
+        <div className="flex-1 flex items-center">
+          <Link href="/" className="flex items-baseline gap-1.5 shrink-0">
+            <span className="text-sm font-bold text-text-primary tracking-tight">
+              BeamSim{pageLabel ? ` ${pageLabel}` : ""}
             </span>
-          )}
-        </Link>
+            {pageLabel && (
+              <span className="text-[10px] text-text-muted hidden sm:inline">
+                2D Beamforming Simulator
+              </span>
+            )}
+          </Link>
+        </div>
 
-        {/* Nav items */}
-        <div className="flex items-center gap-0.5 mx-auto">
+        {/* Nav items — centered */}
+        <div className="flex items-center gap-0.5">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
             return (
@@ -114,10 +116,12 @@ export default function Navbar() {
           })}
         </div>
 
-        {/* Settings placeholder */}
-        <button className="text-text-muted hover:text-text-secondary text-sm shrink-0">
-          ⚙
-        </button>
+        {/* Settings — flex-1 to balance with brand */}
+        <div className="flex-1 flex justify-end">
+          <button className="text-text-muted hover:text-text-secondary text-sm shrink-0">
+            ⚙
+          </button>
+        </div>
       </div>
     </nav>
   );
