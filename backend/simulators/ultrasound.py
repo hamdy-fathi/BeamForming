@@ -96,6 +96,7 @@ class UltrasoundSimulator:
         current_t  = 0.0  # one-way travel time [s]
         current_d  = 0.0  # phantom units traversed so far
         energy     = 1.0  # cumulative amplitude factor
+        apparent_depths: dict[int, float] = {}  # id(isect) → apparent_depth_m
 
         for isect in intersections:
             d_ph = isect["depth_phantom"]
@@ -133,6 +134,7 @@ class UltrasoundSimulator:
 
             # Apparent depth as the machine displays (assuming c_assumed)
             apparent_depth = current_t * C_ASSUMED
+            apparent_depths[id(isect)] = apparent_depth  # save for return
             centre_idx = apparent_depth / sample_spacing
 
             sigma_samples = spike_sigma / sample_spacing
@@ -148,17 +150,82 @@ class UltrasoundSimulator:
             # Acoustic shadowing: reduce forward energy by transmission factor
             energy *= np.sqrt(isect["transmission_factor"])
 
-        # -- Noise (added BEFORE TGC so TGC does not amplify noise floor) --
-        signal = add_noise_1d(signal, snr)
+        # Noise is added AFTER TGC (see below).
+        seed = (int(probe_x * 1e4) ^ int(probe_y * 1e4) ^
+                int(beam_angle * 100) ^ int(frequency / 1e3)) & 0xFFFFFFFF
+        rng  = np.random.default_rng(seed)
 
-        # -- Time-Gain Compensation (TGC) --
-        # exp(tgc_gain): at max depth gain = e^gain
-        # A-mode: gain=3.0 → ≈20x (26 dB) — compensates ~0.5 dB/cm/MHz at 5 MHz over 20 cm
-        # B-mode: gain=1.5 → ≈4.5x (13 dB) — gentler so tissue reflectivity differences remain
-        tgc = np.exp(tgc_gain * np.linspace(0, 1, num_samples))
+        # -- Physics-accurate TGC (tissue-aware) --------------------------------
+        # Build the one-way Beer-Lambert attenuation profile from the *actual*
+        # tissue intersections, then use its inverse as TGC.
+        #
+        # Why: the old formula assumed α=0.1 dB/cm/MHz everywhere (brain tissue).
+        # Skull bone has α=3.0 dB/cm/MHz (30× higher).  The old TGC applied
+        # too much gain at the far skull depth, making it appear brighter than
+        # the near skull entry — physically wrong.
+        #
+        # With tissue-aware TGC:
+        #   TGC(depth) = 1 / (one-way BL amplitude at that depth)²
+        # This exactly cancels Beer-Lambert losses so the displayed amplitude
+        # equals R × (transmission losses only).  Physically correct ordering:
+        #   near skull entry > far skull wall > soft-tissue echoes.
+        # Cap at 30 dB (×31.6) to avoid extreme gain in deep acoustic shadow.
+        if tgc_gain == 3.0:  # sentinel: auto-compute from actual tissue path
+            _sdepths = np.linspace(0, max_depth, num_samples)   # phantom units
+            _bl1     = np.ones(num_samples)   # one-way BL amplitude per sample
+            _prev_d  = 0.0
+            _bl_now  = 1.0
+            for _isect in intersections:
+                _dp = _isect["depth_phantom"]
+                if _dp <= _prev_d + 1e-9:
+                    continue
+                _mid  = _prev_d + (_dp - _prev_d) * 0.5
+                _t    = self.phantom.point_tissue(
+                    probe_x + direction[0] * _mid,
+                    probe_y + direction[1] * _mid)
+                _a    = _t.attenuation if _t else self.phantom.BG_ATTENUATION
+                _sm   = (_dp - _prev_d) * scale          # segment length [m]
+                _bl_e = _bl_now * 10.0 ** (-_a * freq_mhz * _sm * 100.0 / 20.0)
+                _seg  = (_sdepths >= _prev_d) & (_sdepths < _dp)
+                if _seg.any():
+                    _f = (_sdepths[_seg] - _prev_d) / (_dp - _prev_d)
+                    _bl1[_seg] = _bl_now * 10.0 ** (
+                        -_a * freq_mhz * _f * _sm * 100.0 / 20.0)
+                _prev_d, _bl_now = _dp, _bl_e
+            # tail: background medium beyond last boundary
+            _tail = _sdepths >= _prev_d
+            if _tail.any():
+                _ts   = (_sdepths[_tail] - _prev_d) * scale
+                _bl1[_tail] = _bl_now * 10.0 ** (
+                    -self.phantom.BG_ATTENUATION * freq_mhz * _ts * 100.0 / 20.0)
+            # Round-trip TGC = 1 / (one-way)^2, capped at 30 dB
+            tgc = np.clip(1.0 / (_bl1 ** 2 + 1e-30), 1.0, 31.6)
+        else:
+            tgc = np.exp(tgc_gain * np.linspace(0, 1, num_samples))
         signal *= tgc
 
+        # -- Receiver noise (added AFTER TGC) ------------------------------------
+        # Adding noise after TGC gives a uniform noise floor across depth and
+        # frequency.  Adding it before TGC was wrong: the tissue-aware TGC can
+        # apply up to 30 dB (×31.6) gain, which amplified pre-TGC noise by the
+        # same factor — making the noise floor skyrocket at high frequencies and
+        # making the SNR slider nearly ineffective (5× SNR change → only 6 dB).
+        # Post-TGC noise models thermal/receiver electronics noise, which is indeed
+        # independent of depth and frequency.
+        signal = add_noise_1d(signal, snr, rng=rng)
+
         if normalize:
+            # Log-compress the envelope BEFORE peak normalisation.
+            # Same rationale as B-mode: skull reflection (R≈0.64) is 20–60× stronger
+            # than soft-tissue interfaces (R≈0.003–0.02) in the linear domain.
+            # Normalising first would map inner echoes to <3 % of full scale → invisible.
+            # Log-compressing first (60 dB / factor-999 window) maps:
+            #   skull  → 0.93,  inner tissue → 0.25–0.50  (ratio ≈ 2.7×, not 60×).
+            sign   = np.sign(signal)
+            env    = np.abs(signal)
+            env    = np.log1p(env * 999.0) / np.log1p(999.0)
+            signal = sign * env
+
             # Per-scanline normalisation (for A-mode display): peak = 1
             peak = np.max(np.abs(signal))
             if peak > 0:
@@ -167,6 +234,10 @@ class UltrasoundSimulator:
         signal = np.clip(signal, -1.0, 1.0)
 
         depths_m = np.linspace(0, max_depth_m, num_samples)
+
+        # Annotate intersections with their computed apparent depth
+        for isect in intersections:
+            isect["apparent_depth_m"] = round(apparent_depths.get(id(isect), isect["depth"]), 6)
 
         return {
             "depths":        depths_m.tolist(),
@@ -211,11 +282,8 @@ class UltrasoundSimulator:
                 num_samples=num_samples,
                 max_depth=max_depth,
                 normalize=False,   # preserve raw energy so global 2D norm works correctly
-                tgc_gain=0.0,      # NO TGC: let Beer-Lambert attenuation be physically visible.
-                                   # TGC would compensate depth losses and hide:
-                                   #   (a) acoustic shadowing (far skull must be darker)
-                                   #   (b) frequency-dependent penetration (10 MHz dies out
-                                   #       5× faster per cm than 2 MHz — must be visible)
+                # tgc_gain=3.0 (default) → physics-accurate tissue-aware TGC
+                # computed from actual intersections; correctly handles skull bone.
             )
             env = np.abs(np.array(result["amplitudes"]))
             raw_env.append(env)
@@ -233,24 +301,31 @@ class UltrasoundSimulator:
             arr=stack,
         )
 
+        # ── Log compression FIRST (before any normalisation) ───────────────
+        # CRITICAL ORDER: compress dynamic range on the raw amplitudes so that:
+        #   skull boundary  (R ≈ 0.64)  → log scale ≈ 0.93
+        #   soft tissue     (R ≈ 0.01)  → log scale ≈ 0.35
+        # Normalising first and THEN log-compressing is the classic mistake:
+        # the skull sets the linear scale → inner echoes land at 0.5–3 % →
+        # log(0.01) pushes them to ~0.07 and they get wiped by the noise gate.
+        # 60 dB dynamic range (factor 999) matches clinical US displays.
+        DR = 999.0
+        stack = np.log1p(stack * DR) / np.log1p(DR)
+
         # ── Global 2D normalisation ────────────────────────────────────────
-        p99   = float(np.percentile(stack, 99))
+        # After log compression skull ≈ 0.93 and inner tissue ≈ 0.25–0.50,
+        # so a p99 normalisation is now safe — the skull no longer crushes
+        # everything below it.
+        p99 = float(np.percentile(stack, 99))
         if p99 > 0:
             stack /= p99
         stack = np.clip(stack, 0.0, 1.0)
 
         # ── Noise gate ─────────────────────────────────────────────────────
-        # At SNR=200: raw noise/p99 ≈ 0.008; after lateral smoothing ≈ 0.005.
-        # Gate at 0.004 catches most residual noise while tissue echoes
-        # at 2–5 MHz (≈0.002 of skull) remain visible after log compression.
-        noise_gate = 0.004
+        noise_gate = 0.03   # ~30 dB below peak; clean floor without hiding echoes
         stack[stack < noise_gate] = 0.0
 
-        # ── Log compression ────────────────────────────────────────────────
-        # 60 dB range (999×): lifts inner tissue echoes (0.15–0.4 % of skull)
-        # to 2–5 % gray before depth fade, making them faintly visible at 2–5 MHz
-        # while they disappear naturally at 10 MHz (correct frequency behaviour).
-        image = (np.log1p(stack * 999.0) / np.log1p(999.0)).tolist()
+        image = stack.tolist()
 
         max_depth_m = max_depth * self.phantom.SCALE
         depths_m    = np.linspace(0, max_depth_m, num_samples)

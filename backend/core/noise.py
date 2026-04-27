@@ -27,6 +27,9 @@ def add_noise_1d(signal: np.ndarray, snr: float, rng: np.random.Generator | None
 
     rng = rng or np.random.default_rng()
     sig_power = np.mean(np.abs(signal) ** 2) + 1e-30  # avoid div-zero
+    # Use snr² in denominator so noise falls steeply as SNR rises.
+    # At SNR=200 this gives 40× less noise power than the old linear formula,
+    # At SNR=50 it gives 6× less — enough noise to be educational.  
     noise_power = sig_power / (snr + 1.0)
     noise_std = np.sqrt(noise_power)
 

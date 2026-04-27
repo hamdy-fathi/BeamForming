@@ -64,7 +64,8 @@ function drawPhantom(
       const { cx, cy } = toCanvas(el.center_x, el.center_y);
       const ax = (el.semi_a / 2) * PH_SIZE;
       const ay = (el.semi_b / 2) * PH_SIZE;
-      const rot = (el.theta_deg * Math.PI) / 180;
+      // theta_deg is CCW in phantom coords; canvas Y is flipped → must negate for CW canvas rotation
+      const rot = -(el.theta_deg * Math.PI) / 180;
       const Z   = el.impedance;
       const isHovered   = hovered?.id === el.id;
       const isSelected  = selected?.id === el.id;
@@ -115,6 +116,37 @@ function drawPhantom(
       }
     }
   }
+
+  // ── Phantom axes grid ────────────────────────────────────────────────
+  // Phantom SCALE = 0.1 m/unit = 10 cm/unit → full canvas = ±10 cm
+  const PHANTOM_CM_PER_UNIT = 10; // 1 phantom unit = 10 cm
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.lineWidth   = 0.8;
+  ctx.setLineDash([3, 5]);
+  ctx.fillStyle   = "rgba(200,220,255,0.65)";
+  ctx.font        = "9px monospace";
+  // Step every 5 cm = 0.5 phantom units
+  const phStep = 0.5;
+  for (let phX = -1 + phStep; phX < 1; phX += phStep) {
+    const { cx: lx } = toCanvas(phX, 0);
+    ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, PH_SIZE); ctx.stroke();
+    const label = `${(phX * PHANTOM_CM_PER_UNIT).toFixed(0)}`;
+    ctx.fillText(label, lx + 2, PH_SIZE - 3);
+  }
+  for (let phY = -1 + phStep; phY < 1; phY += phStep) {
+    const { cy: ly } = toCanvas(0, phY);
+    ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(PH_SIZE, ly); ctx.stroke();
+    const label = `${(phY * PHANTOM_CM_PER_UNIT).toFixed(0)}cm`;
+    ctx.fillText(label, 3, ly - 2);
+  }
+  // Centre cross-hair
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.setLineDash([]);
+  const { cx: cx0, cy: cy0 } = toCanvas(0, 0);
+  ctx.beginPath(); ctx.moveTo(cx0, 0); ctx.lineTo(cx0, PH_SIZE); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy0); ctx.lineTo(PH_SIZE, cy0); ctx.stroke();
+  ctx.restore();
 
   // Probe
   const { cx: px, cy: py } = toCanvas(probePos.x, probePos.y);
@@ -206,8 +238,8 @@ export default function UltrasoundPage() {
   const dopplerHistRef = useRef<number[][]>([]);
 
   // Beam params
-  const [freq, setFreq] = useState(5e6);
-  const [snr,  setSnr]  = useState(200);
+  const [freq, setFreq] = useState(1e6);
+  const [snr,  setSnr]  = useState(631);
 
   // Refs
   const phantomRef = useRef<HTMLCanvasElement>(null);
@@ -268,6 +300,13 @@ export default function UltrasoundPage() {
     finally { setBLoading(false); }
   }, [probePos, beamAngle, beamParams]);
 
+  // Auto-run B-mode whenever probe/angle/params change (debounced 600 ms)
+  useEffect(() => {
+    if (activeTab !== "b") return;
+    const t = setTimeout(() => runBSweep(), 100);
+    return () => clearTimeout(t);
+  }, [activeTab, runBSweep]);
+
   // Draw B-mode image to canvas — FIXED canonical sector display
   // Apex always at top-centre, fan always opens straight down.
   // Probe position / beam angle affect image *content* only.
@@ -293,7 +332,7 @@ export default function UltrasoundPage() {
     if (angles.length !== nLines) return;
 
     // ── Fixed display geometry (never changes with probe position/angle) ──
-    const MARGIN = 12;
+    const MARGIN = 22;
 
     // Total sweep angular span — purely used for the width of the fan
     const sweepSpanRad = Math.abs(angles[nLines - 1] - angles[0]) * Math.PI / 180;
@@ -371,23 +410,92 @@ export default function UltrasoundPage() {
     }
     ctx.putImageData(id, 0, 0);
 
-    // Thin arc outline at max depth
+    // ── B-Mode axes overlay ────────────────────────────────────────────
+    const depths_m: number[] = bMode.depths ?? [];
+    const maxDepth_m = depths_m[depths_m.length - 1] ?? 0.25;
+
+    // -- Radial depth arcs every 5 cm --
+    const depthStepM = 0.05;
     ctx.save();
-    ctx.strokeStyle = "rgba(100,180,255,0.20)";
+    ctx.strokeStyle = "rgba(100,180,255,0.25)";
+    ctx.lineWidth   = 0.8;
+    ctx.setLineDash([4, 5]);
+    ctx.fillStyle   = "rgba(100,180,255,0.7)";
+    ctx.font        = "10px monospace";
+    for (let d = depthStepM; d <= maxDepth_m + 0.001; d += depthStepM) {
+      const r = (d / maxDepth_m) * depthScale;
+      if (r > depthScale + 2) break;
+      ctx.beginPath();
+      ctx.arc(apexX, apexY, r, canvasAngleLo, canvasAngleHi);
+      ctx.stroke();
+      // Label on the right side of the arc
+      const labelAngle = canvasAngleHi + 0.06;
+      const lx = apexX + Math.cos(labelAngle) * r;
+      const ly = apexY + Math.sin(labelAngle) * r;
+      if (ly > apexY && lx > 0 && lx < W)
+        ctx.fillText(`${(d * 100).toFixed(0)}cm`, Math.min(lx, W - 32), ly + 4);
+    }
+    ctx.restore();
+
+    // -- Radial angle lines every 20° --
+    ctx.save();
+    ctx.strokeStyle = "rgba(100,180,255,0.18)";
+    ctx.lineWidth   = 0.8;
+    ctx.setLineDash([3, 6]);
+    ctx.fillStyle   = "rgba(100,180,255,0.65)";
+    ctx.font        = "9px monospace";
+    const sweepLo = angles[0];
+    const sweepHi = angles[nLines - 1];
+    for (let deg = Math.ceil(sweepLo / 20) * 20; deg <= sweepHi + 0.5; deg += 20) {
+      // Convert probe-local steering angle → canvas angle
+      // sweepLo maps to canvasAngleLo, sweepHi maps to canvasAngleHi
+      const frac       = (deg - sweepLo) / (sweepHi - sweepLo + 1e-12);
+      const cAngle     = canvasAngleLo + frac * sweepSpanRad;
+      const ex         = apexX + Math.cos(cAngle) * depthScale;
+      const ey         = apexY + Math.sin(cAngle) * depthScale;
+      ctx.beginPath();
+      ctx.moveTo(apexX, apexY);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      // Label just beyond the tip
+      const lx = apexX + Math.cos(cAngle) * (depthScale + 14);
+      const ly = apexY + Math.sin(cAngle) * (depthScale + 14);
+      if (lx > 0 && lx < W && ly > 0 && ly < H)
+        ctx.fillText(`${deg}°`, lx - 10, ly + 3);
+    }
+    ctx.restore();
+
+    // -- Outer fan boundary arc --
+    ctx.save();
+    ctx.strokeStyle = "rgba(100,180,255,0.30)";
     ctx.lineWidth   = 1;
+    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(apexX, apexY, depthScale, canvasAngleLo, canvasAngleHi);
-    ctx.lineTo(apexX, apexY);
-    ctx.closePath();
     ctx.stroke();
     ctx.restore();
 
-    // Label
+    // Bottom sweep info label
+    ctx.fillStyle = "rgba(100,180,255,0.55)";
+    ctx.font      = "10px monospace";
     const startDeg = angles[0].toFixed(0);
     const endDeg   = angles[nLines - 1].toFixed(0);
-    ctx.fillStyle = "rgba(100,180,255,0.6)";
-    ctx.font      = "10px monospace";
     ctx.fillText(`B-Mode  ${nLines} lines · sweep ${startDeg}°→${endDeg}°`, 8, H - 8);
+
+    // ── Probe marker at apex ───────────────────────────────────────────
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(apexX +0.5, apexY - 2, 3, 0, Math.PI * 2);
+    ctx.fillStyle   = "rgba(59,130,246,0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(147,197,253,0.8)";
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+    ctx.font        = "bold 11px monospace";
+    ctx.fillStyle   = "rgba(147,197,253,0.85)";
+    ctx.textAlign   = "center";
+    ctx.fillText("PROBE", apexX, apexY - 10);
+    ctx.restore();
   }, [bMode]);
 
 
@@ -475,14 +583,40 @@ export default function UltrasoundPage() {
     draggingRef.current = null;
     if (pressed === "vessel") {
       const { mx, my } = phantomCoords(e);
+      // Chain: persist vessel position → refresh phantom display → re-run active scan.
+      // Chaining is critical: fires scan AFTER backend confirms the new position,
+      // otherwise the scan would still use the old vessel coordinates.
       updateVessel({ center_x: parseFloat(mx.toFixed(3)), center_y: parseFloat(my.toFixed(3)) })
+        .then(() => getPhantom().then(p => {
+          // Preserve the slider-set vx/vy — backend only knows the last "Apply"
+          // value, so refreshing without patching would reset the arrow direction.
+          setPhantom({
+            ...p,
+            ellipses: p.ellipses.map((el: any) =>
+              el.id === 10 ? { ...el, vx, vy } : el
+            ),
+          });
+        }))
+        .then(() => {
+          if (activeTab === "a")       runAScan();
+          else if (activeTab === "b")  runBSweep();
+          else                         runDoppler();
+        })
         .catch(console.error);
+    } else if (activeTab === "a") {
+      // Probe drag: A-mode re-runs (B/Doppler auto-react via their useEffect deps)
+      runAScan();
     }
-    if (activeTab === "a") runAScan();
   };
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (draggingRef.current) return;
+    const { mx, my } = phantomCoords(e);
+    const el = findEllipse(mx, my);
+    setSelected(el ?? null);   // clears selection when clicking empty space
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const { mx, my } = phantomCoords(e);
     const el = findEllipse(mx, my);
     if (el) { setSelected(el); setEditModal({ ...el }); }
@@ -497,6 +631,7 @@ export default function UltrasoundPage() {
       density: editModal.density,
       attenuation: editModal.attenuation,
       tissue_name: editModal.tissue_name,
+      impedance: editModal.impedance,
     });
     const p = await getPhantom(); setPhantom(p);
     setSelected(null); setEditModal(null);
@@ -549,7 +684,7 @@ export default function UltrasoundPage() {
           {/* Phantom canvas */}
           <div className="rounded-xl border border-border bg-bg-surface p-3">
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-              Phantom — drag probe on edge · drag vessel · click to edit
+              Phantom — drag probe on edge · drag vessel · click to inspect · dbl-click to edit
             </h3>
             <canvas
               ref={phantomRef}
@@ -560,6 +695,7 @@ export default function UltrasoundPage() {
               onMouseUp={handleMouseUp}
               onMouseLeave={() => { draggingRef.current = null; setHovered(null); }}
               onClick={handleClick}
+              onDoubleClick={handleDoubleClick}
             />
 
             {/* Impedance legend */}
@@ -571,18 +707,48 @@ export default function UltrasoundPage() {
               <span className="text-[9px] text-text-muted">1.5 → 7.8</span>
             </div>
 
-            {/* Tooltip on hover */}
+            {/* Hover tooltip — quick-look while hovering */}
             {hovered && (
               <div className="mt-2 rounded-lg border border-border bg-bg-elevated p-2 text-[11px] animate-fade-in space-y-0.5">
                 <p className="font-semibold" style={{ color: zToColor(hovered.impedance, 1) }}>
-                  #{hovered.id} {hovered.name} — <span className="text-text-secondary">{hovered.tissue_name}</span>
+                  #{hovered.id} {hovered.name} — <span className="text-text-muted">{hovered.tissue_name}</span>
                 </p>
-                <div className="grid grid-cols-2 gap-x-3 text-text-muted">
-                  <span>c = {hovered.speed} m/s</span>
-                  <span>ρ = {hovered.density} kg/m³</span>
-                  <span>Z = {hovered.impedance?.toFixed(3)} MRayl</span>
-                  <span>α = {hovered.attenuation} dB/cm/MHz</span>
+                <p className="text-[10px] text-text-muted font-mono">
+                  Z = {hovered.impedance?.toFixed(3)} MRayl · α = {hovered.attenuation} dB/cm/MHz
+                </p>
+              </div>
+            )}
+
+            {/* Selected panel — persistent until clicked out or ✕ */}
+            {selected && !editModal && (
+              <div className="mt-2 rounded-lg border border-accent-blue/40 bg-bg-elevated p-3 text-[11px] animate-fade-in space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold" style={{ color: zToColor(selected.impedance, 1) }}>
+                    #{selected.id} {selected.name}
+                    <span className="ml-1 text-text-secondary font-normal">— {selected.tissue_name}</span>
+                  </p>
+                  <button
+                    onClick={() => setSelected(null)}
+                    className="text-text-muted hover:text-text-primary text-xs leading-none px-1"
+                    title="Dismiss"
+                  >✕</button>
                 </div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 font-mono text-[10px] text-text-muted">
+                  <span>c = {selected.speed} m/s</span>
+                  <span>ρ = {selected.density} kg/m³</span>
+                  <span>Z = {selected.impedance?.toFixed(3)} MRayl</span>
+                  <span>α = {selected.attenuation} dB/cm/MHz</span>
+                  {selected.id === 10 && (
+                    <>
+                      <span>vx = {selected.vx} m/s</span>
+                      <span>vy = {selected.vy} m/s</span>
+                    </>
+                  )}
+                </div>
+                <p className="text-[9px] font-mono text-text-muted">
+                  center ({selected.center_x}, {selected.center_y}) · a={selected.semi_a} b={selected.semi_b} θ={selected.theta_deg}°
+                </p>
+                <p className="text-[9px] text-text-muted">Double-click to edit acoustic properties</p>
               </div>
             )}
           </div>
@@ -600,7 +766,7 @@ export default function UltrasoundPage() {
                 onChange={e => setFreq(Number(e.target.value))} />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-text-secondary">SNR: <span className="text-text-primary font-mono">{snr}</span></label>
+              <label className="text-[10px] text-text-secondary">SNR: <span className="text-text-primary font-mono">{snr < 1000 ? snr : "inf"}</span></label>
               <input type="range" min={0} max={1000} step={5} value={snr}
                 onChange={e => setSnr(Number(e.target.value))} />
             </div>
@@ -631,12 +797,36 @@ export default function UltrasoundPage() {
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-text-secondary">Flow direction: <span className="font-mono text-text-primary">{vesselDir.toFixed(0)}°</span></label>
                 <input type="range" min={0} max={360} value={vesselDir}
-                  onChange={e => setVesselDir(Number(e.target.value))} />
+                  onChange={e => {
+                    const dir = Number(e.target.value);
+                    setVesselDir(dir);
+                    // Patch local phantom so the arrow on the canvas animates immediately
+                    const newVx = vesselSpd * Math.cos((dir * Math.PI) / 180);
+                    const newVy = vesselSpd * Math.sin((dir * Math.PI) / 180);
+                    setPhantom((p: any) => p ? {
+                      ...p,
+                      ellipses: p.ellipses.map((el: any) =>
+                        el.id === 10 ? { ...el, vx: newVx, vy: newVy } : el
+                      ),
+                    } : p);
+                  }} />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[10px] text-text-secondary">Flow speed: <span className="font-mono text-text-primary">{vesselSpd.toFixed(2)} m/s</span></label>
                 <input type="range" min={-3} max={3} step={0.05} value={vesselSpd}
-                  onChange={e => setVesselSpd(Number(e.target.value))} />
+                  onChange={e => {
+                    const spd = Number(e.target.value);
+                    setVesselSpd(spd);
+                    // Patch local phantom so the arrow on the canvas animates immediately
+                    const newVx = spd * Math.cos((vesselDir * Math.PI) / 180);
+                    const newVy = spd * Math.sin((vesselDir * Math.PI) / 180);
+                    setPhantom((p: any) => p ? {
+                      ...p,
+                      ellipses: p.ellipses.map((el: any) =>
+                        el.id === 10 ? { ...el, vx: newVx, vy: newVy } : el
+                      ),
+                    } : p);
+                  }} />
               </div>
               <div className="text-[9px] text-text-muted font-mono">
                 vx={vx.toFixed(3)} m/s &nbsp; vy={vy.toFixed(3)} m/s
@@ -703,7 +893,7 @@ export default function UltrasoundPage() {
                       {aMode?.intersections?.map((isect: any, i: number) => (
                         <ReferenceLine
                           key={i}
-                          x={parseFloat(((isect.depth) * 100).toFixed(2))}
+                          x={parseFloat(((isect.apparent_depth_m ?? isect.depth) * 100).toFixed(2))}
                           stroke="#c0635f44"
                           strokeDasharray="3 2"
                           strokeWidth={1}
@@ -736,7 +926,7 @@ export default function UltrasoundPage() {
                         {aMode.intersections.map((isect: any, i: number) => (
                           <tr key={i} className="border-b border-border/30 hover:bg-bg-elevated transition-colors">
                             <td className="py-1 pr-3 font-mono text-accent-blue">
-                              {(isect.depth * 100).toFixed(2)} cm
+                              {((isect.apparent_depth_m ?? isect.depth) * 100).toFixed(2)} cm
                             </td>
                             <td className="py-1 pr-3 text-text-secondary">
                               {isect.tissue_before} → {isect.tissue_after}
@@ -774,7 +964,7 @@ export default function UltrasoundPage() {
                 </div>
                 <div className="flex gap-2 items-center">
                   {bLoading && <span className="text-[10px] text-text-muted animate-pulse">sweeping…</span>}
-                  <button
+                  {/* <button
                     onClick={runBSweep}
                     disabled={bLoading}
                     className="rounded-lg border border-accent-teal/50 bg-accent-teal/10 px-3 py-1.5 text-xs font-medium text-accent-teal hover:bg-accent-teal/20 transition-colors disabled:opacity-40"
@@ -786,10 +976,10 @@ export default function UltrasoundPage() {
                     className="rounded-lg border border-border px-3 py-1.5 text-xs text-text-muted hover:text-accent-red hover:border-accent-red transition-colors"
                   >
                     Clear
-                  </button>
+                  </button> */}
                 </div>
               </div>
-              <div className="rounded-lg overflow-hidden border border-border bg-[#0e1117]" style={{ height: 360 }}>
+              <div className="rounded-lg overflow-hidden border border-border bg-[#0e1117]" style={{ height: 400 }}>
                 {bMode ? (
                   <canvas ref={bRef} className="w-full h-full" />
                 ) : (
@@ -828,7 +1018,7 @@ export default function UltrasoundPage() {
                 <div className="grid grid-cols-4 gap-2">
                   {[
                     { label: "Doppler Shift", value: `${doppler.doppler_shift_hz.toFixed(0)} Hz`, color: "#c0635f" },
-                    { label: "Velocity",      value: `${(doppler.estimated_velocity_ms * 100).toFixed(1)} cm/s`, color: "#6b8cbe" },
+                    { label: "Velocity",      value: `${(doppler.estimated_velocity_ms).toFixed(1)} m/s`, color: "#6b8cbe" },
                     { label: "Angle θ",       value: `${doppler.insonation_angle_deg.toFixed(1)}°`, color: "#6ea8a0" },
                     { label: "cos(θ)",        value: doppler.cos_theta?.toFixed(3) ?? "—", color: "#9480b3" },
                   ].map(m => (
@@ -876,7 +1066,7 @@ export default function UltrasoundPage() {
                   <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">Physics Summary</h3>
                   <div className="text-[10px] text-text-muted font-mono space-y-0.5">
                     <p>Δf = 2 · f₀ · v · cos(θ) / c</p>
-                    <p>   = 2 · {(freq/1e6).toFixed(1)}MHz · {(Math.abs(doppler.estimated_velocity_ms)*100).toFixed(1)}cm/s · {doppler.cos_theta?.toFixed(3)} / 1540 m/s</p>
+                    <p>   = 2 · {(freq/1e6).toFixed(1)}MHz · {(Math.abs(doppler.estimated_velocity_ms)).toFixed(1)}m/s · {doppler.cos_theta?.toFixed(3)} / 1540 m/s</p>
                     <p className="text-accent-red">   = {doppler.doppler_shift_hz.toFixed(1)} Hz ({doppler.flow_direction})</p>
                   </div>
                 </div>
@@ -916,25 +1106,64 @@ export default function UltrasoundPage() {
 
             <div className="space-y-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Acoustic Properties</p>
-              {[
-                { k: "tissue_name", l: "Tissue Name",           type: "text"   },
-                { k: "speed",       l: "Speed of Sound (m/s)",  type: "number" },
-                { k: "density",     l: "Density (kg/m³)",       type: "number" },
-                { k: "attenuation", l: "Attenuation (dB/cm/MHz)", type: "number" },
-              ].map(({ k, l, type }) => (
-                <div key={k}>
-                  <label className="text-[10px] text-text-secondary">{l}</label>
-                  <input
-                    type={type}
-                    step={type === "number" ? "any" : undefined}
-                    value={editModal[k]}
-                    onChange={e => setEditModal((m: any) => ({
-                      ...m, [k]: type === "number" ? Number(e.target.value) : e.target.value
-                    }))}
-                    className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors"
-                  />
-                </div>
-              ))}
+
+              {/* Tissue name */}
+              <div>
+                <label className="text-[10px] text-text-secondary">Tissue Name</label>
+                <input type="text" value={editModal.tissue_name}
+                  onChange={e => setEditModal((m: any) => ({ ...m, tissue_name: e.target.value }))}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors" />
+              </div>
+
+              {/* Speed — changing speed recalculates impedance display */}
+              <div>
+                <label className="text-[10px] text-text-secondary">Speed of Sound (m/s)</label>
+                <input type="number" step="any" value={editModal.speed}
+                  onChange={e => {
+                    const spd = Number(e.target.value);
+                    setEditModal((m: any) => ({
+                      ...m,
+                      speed: spd,
+                      impedance: spd > 0 ? +(spd * m.density / 1e6).toFixed(4) : m.impedance,
+                    }));
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors" />
+              </div>
+
+              {/* Density — changing density recalculates impedance display */}
+              <div>
+                <label className="text-[10px] text-text-secondary">Density (kg/m³)</label>
+                <input type="number" step="any" value={editModal.density}
+                  onChange={e => {
+                    const rho = Number(e.target.value);
+                    setEditModal((m: any) => ({
+                      ...m,
+                      density: rho,
+                      impedance: rho > 0 ? +(m.speed * rho / 1e6).toFixed(4) : m.impedance,
+                    }));
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors" />
+              </div>
+
+              {/* Impedance — changing Z back-calculates density (Z=ρc → ρ=Z/c) */}
+              <div>
+                <label className="text-[10px] text-text-secondary">Acoustic Impedance (MRayl) — updates density</label>
+                <input type="number" step="any" value={editModal.impedance}
+                  onChange={e => {
+                    const z = Number(e.target.value);
+                    const newDensity = editModal.speed > 0 ? +(z * 1e6 / editModal.speed).toFixed(2) : editModal.density;
+                    setEditModal((m: any) => ({ ...m, impedance: z, density: newDensity }));
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors" />
+              </div>
+
+              {/* Attenuation */}
+              <div>
+                <label className="text-[10px] text-text-secondary">Attenuation (dB/cm/MHz)</label>
+                <input type="number" step="any" value={editModal.attenuation}
+                  onChange={e => setEditModal((m: any) => ({ ...m, attenuation: Number(e.target.value) }))}
+                  className="mt-0.5 w-full rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent-blue transition-colors" />
+              </div>
             </div>
 
             <div className="mt-4 flex gap-2">

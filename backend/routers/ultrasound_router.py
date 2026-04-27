@@ -37,6 +37,7 @@ async def update_tissue(req: TissueProperties):
         density=req.density,
         attenuation=req.attenuation,
         tissue_name=req.tissue_name or None,
+        impedance=req.impedance,
     )
     return {
         "status":  "updated",

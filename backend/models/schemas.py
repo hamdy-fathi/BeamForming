@@ -83,11 +83,11 @@ class UserMoveRequest(BaseModel):
 # ── Ultrasound ───────────────────────────────────────────────────────────
 
 class USBeamParams(BaseModel):
-    frequency:       float = Field(5e6,   gt=0)
+    frequency:       float = Field(1e6,   gt=0)
     num_elements:    int   = Field(64,    ge=2,  le=128)
     element_spacing: float = Field(0.5,   ge=0.1, le=2.0)
     window_type:     WindowTypeEnum = WindowTypeEnum.HAMMING
-    snr:             float = Field(200.0, ge=0,  le=1000)
+    snr:             float = Field(631.0, ge=0,  le=1000)
 
 
 class TissueProperties(BaseModel):
@@ -97,6 +97,8 @@ class TissueProperties(BaseModel):
     speed:       float = Field(1540.0, gt=0)
     density:     float = Field(1040.0, gt=0)
     attenuation: float = Field(0.6,    ge=0)
+    # Optional: when supplied, back-calculates density = Z × 1e6 / speed
+    impedance:   Optional[float] = Field(None, gt=0)
 
 
 class EllipseGeometryUpdate(BaseModel):
