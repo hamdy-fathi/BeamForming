@@ -1,27 +1,29 @@
 "use client";
 import { useRef, useEffect, useCallback, useState } from "react";
-import { Detection, PPI_SIZE, MAX_RANGE, polarToXY } from "./helpers";
+import { Detection, PPI_SIZE, polarToXY } from "./helpers";
 
 interface Props {
-  sweepResult: any;
+  ppiBuffer: Array<{angle: number, returns: number[]}>;
   detections: Detection[];
   scanning: boolean;
   scanSpeed: number;
   beamWidth: number;
   sweepAngle: number;
   setSweepAngle: (a: number) => void;
-  onRevealedDetectionIdsChange?: (ids: number[]) => void;
+  maxRange: number;
+  beamformingResult?: any;
 }
 
 export default function RadarPPI({
-  sweepResult,
+  ppiBuffer,
   detections,
   scanning,
   scanSpeed,
   beamWidth,
   sweepAngle,
   setSweepAngle,
-  onRevealedDetectionIdsChange,
+  maxRange,
+  beamformingResult,
 }: Props) {
   const ppiRef = useRef<HTMLCanvasElement>(null);
   const bbRef = useRef<HTMLCanvasElement | null>(null);
@@ -75,10 +77,10 @@ export default function RadarPPI({
     ctx.fillText("0°", cx, 16); ctx.fillText("180°", cx, PPI_SIZE - 6);
     ctx.fillText("90°", PPI_SIZE - 10, cy + 4); ctx.fillText("270°", 14, cy + 4);
     for (let i = 1; i <= 5; i++) {
-      const km = (MAX_RANGE * i / 5 / 1000).toFixed(0);
+      const km = (maxRange * i / 5 / 1000).toFixed(0);
       ctx.fillText(`${km}`, cx + 14, cy - r * i / 5 + 4);
     }
-  }, []);
+  }, [cx, cy, r, maxRange]);
 
   // Static draw (idle scope only: no pre-revealed detections)
   const drawStatic = useCallback(() => {
@@ -90,12 +92,35 @@ export default function RadarPPI({
     ctx.fillStyle = "#0a0f0a"; ctx.fillRect(0, 0, PPI_SIZE, PPI_SIZE);
     drawGrid(ctx); drawLabels(ctx);
 
-    // Sweep line
-    const sa = sweepAngle * Math.PI / 180 - Math.PI / 2;
-    ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r); ctx.stroke();
+    // Sweep beam
+    if (beamformingResult?.beam_profile) {
+      const { angles, magnitudes_db } = beamformingResult.beam_profile;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      for (let i = 0; i < angles.length; i++) {
+        const localAngle = angles[i];
+        const db = Math.max(-60, magnitudes_db[i]);
+        const intensity = Math.pow(10, db / 20);
+        const a = (sweepAngle + localAngle) * Math.PI / 180 - Math.PI / 2;
+        const dist = intensity * r;
+        ctx.lineTo(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist);
+      }
+      ctx.closePath();
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      grad.addColorStop(0, "rgba(34,197,94,0.4)");
+      grad.addColorStop(1, "rgba(34,197,94,0.0)");
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(34,197,94,0.5)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      const sa = sweepAngle * Math.PI / 180 - Math.PI / 2;
+      ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r); ctx.stroke();
+    }
     ctx.fillStyle = "#22c55e"; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
-  }, [sweepAngle, drawGrid, drawLabels]);
+  }, [sweepAngle, drawGrid, drawLabels, beamformingResult, maxRange, cx, cy, r]);
 
   useEffect(() => { if (!scanning) drawStatic(); }, [scanning, drawStatic]);
 
@@ -103,25 +128,16 @@ export default function RadarPPI({
     if (!scanning) return;
     setRevealedTracks([]);
     revealedRef.current = [];
-    onRevealedDetectionIdsChange?.([]);
     angleRef.current = 0;
     setSweepAngle(0);
-  }, [scanning, setSweepAngle, onRevealedDetectionIdsChange]);
+  }, [scanning, setSweepAngle]);
 
   useEffect(() => {
     if (!scanning) {
       revealedRef.current = [];
       setRevealedTracks([]);
-      onRevealedDetectionIdsChange?.([]);
     }
-  }, [scanning, onRevealedDetectionIdsChange]);
-
-  useEffect(() => {
-    const ids = detections
-      .filter((d) => revealedRef.current.some((t) => isTrackMatch(t, d)))
-      .map((d) => d.det_id);
-    onRevealedDetectionIdsChange?.(ids);
-  }, [detections, revealedTracks, isTrackMatch, onRevealedDetectionIdsChange]);
+  }, [scanning]);
 
   // Animation loop
   useEffect(() => {
@@ -190,12 +206,12 @@ export default function RadarPPI({
       const sa = angle * Math.PI / 180 - Math.PI / 2;
 
       // Draw returns at current angle
-      if (sweepResult?.ppi_data) {
-        const closest = sweepResult.ppi_data.reduce((best: any, scan: any) => {
+      if (ppiBuffer && ppiBuffer.length > 0) {
+        const closest = ppiBuffer.reduce((best: any, scan: any) => {
           const diff = Math.abs(((scan.angle - angle + 360) % 360));
           const bestDiff = Math.abs(((best.angle - angle + 360) % 360));
           return diff < bestDiff ? scan : best;
-        }, sweepResult.ppi_data[0]);
+        }, ppiBuffer[0]);
         if (closest) {
           const a = closest.angle * Math.PI / 180 - Math.PI / 2;
           closest.returns.forEach((v: number, i: number) => {
@@ -209,11 +225,34 @@ export default function RadarPPI({
         }
       }
 
-      // Sweep line
-      const grad = ctx.createLinearGradient(cx, cy, cx + Math.cos(sa) * r, cy + Math.sin(sa) * r);
-      grad.addColorStop(0, "rgba(34,197,94,0.9)"); grad.addColorStop(1, "rgba(34,197,94,0.0)");
-      ctx.strokeStyle = grad; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r); ctx.stroke();
+      // Sweep beam
+      if (beamformingResult?.beam_profile) {
+        const { angles, magnitudes_db } = beamformingResult.beam_profile;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        for (let i = 0; i < angles.length; i++) {
+          const localAngle = angles[i];
+          const db = Math.max(-60, magnitudes_db[i]);
+          const intensity = Math.pow(10, db / 20);
+          const a = (angle + localAngle) * Math.PI / 180 - Math.PI / 2;
+          const dist = intensity * r;
+          ctx.lineTo(cx + Math.cos(a) * dist, cy + Math.sin(a) * dist);
+        }
+        ctx.closePath();
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+        grad.addColorStop(0, "rgba(34,197,94,0.4)");
+        grad.addColorStop(1, "rgba(34,197,94,0.0)");
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(34,197,94,0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        const grad = ctx.createLinearGradient(cx, cy, cx + Math.cos(sa) * r, cy + Math.sin(sa) * r);
+        grad.addColorStop(0, "rgba(34,197,94,0.9)"); grad.addColorStop(1, "rgba(34,197,94,0.0)");
+        ctx.strokeStyle = grad; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sa) * r, cy + Math.sin(sa) * r); ctx.stroke();
+      }
       ctx.fillStyle = "#22c55e"; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
 
       // Blit
@@ -225,8 +264,8 @@ export default function RadarPPI({
         drawLabels(vctx);
         // Draw detection markers on visible canvas
         revealedRef.current.forEach((d) => {
-          const { x, y } = polarToXY(d.est_angle, d.est_range, cx, cy, r, MAX_RANGE);
-          const ur = d.uncertainty_range / MAX_RANGE * r;
+          const { x, y } = polarToXY(d.est_angle, d.est_range, cx, cy, r, maxRange);
+          const ur = d.uncertainty_range / maxRange * r;
           vctx.strokeStyle = "rgba(245,158,11,0.5)"; vctx.lineWidth = 1;
           vctx.setLineDash([4, 3]); vctx.beginPath(); vctx.arc(x, y, Math.max(ur, 6), 0, Math.PI * 2); vctx.stroke();
           vctx.setLineDash([]);
@@ -240,7 +279,7 @@ export default function RadarPPI({
     };
     animRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animRef.current);
-  }, [scanning, scanSpeed, sweepResult, detections, beamWidth, setSweepAngle, drawGrid, drawLabels, isTrackMatch, beamWindow]);
+  }, [scanning, scanSpeed, ppiBuffer, detections, beamWidth, setSweepAngle, drawGrid, drawLabels, isTrackMatch, beamWindow, maxRange, cx, cy, r, beamformingResult]);
 
   return (
     <div className="flex flex-col items-center">

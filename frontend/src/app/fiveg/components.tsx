@@ -5,9 +5,9 @@ export const TOWER_COLORS = ["#22c55e", "#3b82f6", "#f59e0b"];
 export const USER_COLORS = ["#ef4444", "#a855f7"];
 
 export const DEFAULT_TOWERS = [
-  { position: { x: 200, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
-  { position: { x: 600, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
-  { position: { x: 400, y: 150 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0 },
+  { position: { x: 200, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
+  { position: { x: 600, y: 500 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
+  { position: { x: 400, y: 150 }, num_elements: 32, frequency: 28e9, coverage_radius: 500, element_spacing: 0.5, window_type: "hamming", snr: 1000, power_dbm: 30, steering_angle: 0, kaiser_beta: 6.0 },
 ];
 
 export const DEFAULT_USERS = [
@@ -15,7 +15,6 @@ export const DEFAULT_USERS = [
   { x: 450, y: 380 },
 ];
 
-export const DEFAULT_OBSTACLES: { id: number; x: number; y: number; width: number; height: number; reflection_loss_db: number }[] = [];
 
 /* ── Tower Param Row ─────────────────────────────────── */
 export function TowerParamRow({ label, value, min, max, step, unit, onChange, color }: {
@@ -38,8 +37,8 @@ export function TowerParamRow({ label, value, min, max, step, unit, onChange, co
 }
 
 /* ── Mini Polar Plot ─────────────────────────────────── */
-export function MiniPolar({ profile, color, size = 90 }: {
-  profile: any; color: string; size?: number;
+export function MiniPolar({ profile, color, size = 90, targetDirDeg = -90 }: {
+  profile: any; color: string; size?: number; targetDirDeg?: number;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -70,33 +69,40 @@ export function MiniPolar({ profile, color, size = 90 }: {
     ctx.textAlign = "left"; ctx.fillText("0°", size - 14, cy - 2);
     ctx.textAlign = "right"; ctx.fillText("0°", 14, cy - 2);
 
-    // Beam shape — profile covers -90° to +90° (upper half-plane).
-    // We mirror it to create a symmetric full-circle polar pattern.
     const { angles, magnitudes_db } = profile;
 
-    // Convert dB to linear amplitude for smooth radius mapping
+    // Find actual peak in the profile
+    let peakIdx = 0;
+    for (let i = 1; i < magnitudes_db.length; i++) {
+      if (magnitudes_db[i] > magnitudes_db[peakIdx]) peakIdx = i;
+    }
+    // Profile peak canvas position (without correction) = π/2 - peakAngle
+    const peakCanvasPos = Math.PI / 2 - angles[peakIdx] * Math.PI / 180;
+    // Target direction in canvas cos/sin convention
+    const targetCanvasDir = Math.PI / 2 - targetDirDeg * Math.PI / 180;
+    // Correction to align peak to target
+    const rotOff = targetCanvasDir - peakCanvasPos;
+
     const amps: number[] = magnitudes_db.map((db: number) => {
       const clamped = Math.max(-40, Math.min(0, db));
-      return Math.pow(10, clamped / 20); // 0..1 linear
+      return Math.pow(10, clamped / 20);
     });
 
-    // Draw the front lobe (angles -90..+90 mapped to top half-plane)
+    // Front lobe — same formula as canvas: ca = π/2 - profileAngle + rotOff
     ctx.beginPath();
-    // Front half: angles go from -90° to +90°
-    // In canvas coords: -90° → left, 0° → top, +90° → right
     for (let i = 0; i < angles.length; i++) {
       const r = amps[i] * maxR;
-      const canvasAngle = (angles[i] - 90) * Math.PI / 180; // 0° broadside → top
-      const px = cx + r * Math.cos(canvasAngle);
-      const py = cy + r * Math.sin(canvasAngle);
+      const ca = Math.PI / 2 - angles[i] * Math.PI / 180 + rotOff;
+      const px = cx + r * Math.cos(ca);
+      const py = cy + r * Math.sin(ca);
       i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
-    // Mirror: back half (draw in reverse, reflected through center)
+    // Back lobe (mirrored, attenuated)
     for (let i = angles.length - 1; i >= 0; i--) {
-      const r = amps[i] * maxR * 0.15; // back lobes much smaller
-      const canvasAngle = (angles[i] - 90) * Math.PI / 180 + Math.PI;
-      const px = cx + r * Math.cos(canvasAngle);
-      const py = cy + r * Math.sin(canvasAngle);
+      const r = amps[i] * maxR * 0.15;
+      const ca = Math.PI / 2 - angles[i] * Math.PI / 180 + rotOff + Math.PI;
+      const px = cx + r * Math.cos(ca);
+      const py = cy + r * Math.sin(ca);
       ctx.lineTo(px, py);
     }
     ctx.closePath();
@@ -105,7 +111,7 @@ export function MiniPolar({ profile, color, size = 90 }: {
     grad.addColorStop(0, color + "50"); grad.addColorStop(0.7, color + "20"); grad.addColorStop(1, color + "05");
     ctx.fillStyle = grad; ctx.fill();
     ctx.strokeStyle = color + "bb"; ctx.lineWidth = 1.2; ctx.stroke();
-  }, [profile, color, size]);
+  }, [profile, color, size, targetDirDeg]);
 
   return <canvas ref={ref} className="mini-polar" />;
 }
@@ -156,13 +162,27 @@ export function VizCheckboxes({ viz, setViz }: { viz: Record<string, boolean>; s
 }
 
 /* ── Tower Card ──────────────────────────────────────── */
-export function TowerCard({ tower, tResult, index, updateParam }: {
+export function TowerCard({ tower, tResult, index, updateParam, userPositions }: {
   tower: any; tResult: any; index: number; updateParam: (i: number, k: string, v: number) => void;
+  userPositions?: {x: number, y: number}[];
 }) {
   const color = TOWER_COLORS[index];
   const conns: any[] = tResult?.connections || [];
   const beams: any[] = tResult?.user_beams || [];
   const profile = tResult?.beam_profile;
+
+  // Compute real (unclipped) direction to first connected user in backend convention
+  let realTargetDirDeg = tower.steering_angle ?? 0;
+  if (beams.length > 0 && userPositions && tResult?.position) {
+    const uid = beams[0]?.user_id;
+    const uPos = userPositions?.[uid];
+    if (uPos) {
+      const dx = uPos.x - tResult.position.x;
+      const dy = uPos.y - tResult.position.y;
+      // Backend convention: atan2(dx, dy)
+      realTargetDirDeg = Math.atan2(dx, dy) * 180 / Math.PI;
+    }
+  }
 
   return (
     <div className="glow-card p-3" style={{ "--card-color": color } as any}>
@@ -193,6 +213,10 @@ export function TowerCard({ tower, tResult, index, updateParam }: {
             onChange={v => updateParam(index, "power_dbm", v)} />
           <TowerParamRow label="Steering" value={tower.steering_angle ?? 0} min={-89} max={89} step={1} unit="°"
             onChange={v => updateParam(index, "steering_angle", v)} color={color} />
+          <TowerParamRow label="Radius" value={tower.coverage_radius ?? 500} min={100} max={1000} step={25} unit="m"
+            onChange={v => updateParam(index, "coverage_radius", v)} />
+          <TowerParamRow label="Kaiser β" value={tower.kaiser_beta ?? 6} min={0} max={20} step={0.5}
+            onChange={v => updateParam(index, "kaiser_beta", v)} />
           <div className="flex gap-3 text-[10px] text-text-muted pt-0.5">
             <span>Users: <span className="text-text-primary font-mono">{conns.length}</span></span>
             <span>Total Power / User: <span className="text-text-primary font-mono">
@@ -201,10 +225,43 @@ export function TowerCard({ tower, tResult, index, updateParam }: {
           </div>
         </div>
 
-        {/* Mini polar */}
+        {/* Mini polars — one per connected user beam, or primary beam when idle */}
         <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
-          <span className="text-[8px] text-text-muted">Array Factor (dB)</span>
-          <MiniPolar profile={profile} color={color} size={85} />
+          {beams.length > 0 ? beams.map((beam: any) => {
+            // Compute real direction for each beam's user
+            let dirDeg = tower.steering_angle ?? 0;
+            if (userPositions && tResult?.position) {
+              const uPos = userPositions?.[beam.user_id];
+              if (uPos) {
+                const dx = uPos.x - tResult.position.x;
+                const dy = uPos.y - tResult.position.y;
+                dirDeg = Math.atan2(dx, dy) * 180 / Math.PI;
+              }
+            }
+            return (
+              <div key={beam.user_id} className="flex flex-col items-center">
+                <span className="text-[8px] text-text-muted">
+                  Serving U{beam.user_id + 1}
+                </span>
+                <MiniPolar
+                  profile={beam.beam_profile}
+                  color={color}
+                  size={beams.length > 1 ? 65 : 85}
+                  targetDirDeg={dirDeg}
+                />
+              </div>
+            );
+          }) : (
+            <div className="flex flex-col items-center">
+              <span className="text-[8px] text-text-muted">Array Factor (dB)</span>
+              <MiniPolar
+                profile={profile}
+                color={color}
+                size={85}
+                targetDirDeg={realTargetDirDeg}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

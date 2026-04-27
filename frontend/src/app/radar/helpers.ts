@@ -1,7 +1,7 @@
 export const PPI_SIZE = 480;
 export const GT_SIZE = 480;
 export const MAX_TARGETS = 5;
-export const MAX_RANGE = 50000;
+export const DEFAULT_MAX_RANGE = 50000;
 
 export interface Target { id: number; distance: number; angle: number; size: number; }
 export interface Detection { det_id: number; est_range: number; est_angle: number; signal_level: number; est_size: number; uncertainty_range: number; uncertainty_angle: number; uncertainty_size: number; num_hits: number; }

@@ -49,6 +49,74 @@ function drawPhantom(
   ctx.fillStyle = "#0e1117";
   ctx.fillRect(0, 0, PH_SIZE, PH_SIZE);
 
+    // Coordinate grid + axes around the phantom
+  ctx.save();
+
+  // Light grid lines
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.lineWidth = 1;
+  ctx.font = "9px monospace";
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+
+  const gridSteps = [-1, -0.5, 0, 0.5, 1];
+
+  // Convert phantom coordinates [-1, 1] to canvas pixels
+  const gridToCanvas = (gx: number, gy: number) => ({
+    cx: ((gx + 1) / 2) * PH_SIZE,
+    cy: ((1 - gy) / 2) * PH_SIZE,
+  });
+
+  // Vertical grid lines + x labels
+  for (const gx of gridSteps) {
+    const pTop = gridToCanvas(gx, 1);
+    const pBottom = gridToCanvas(gx, -1);
+
+    ctx.beginPath();
+    ctx.moveTo(pTop.cx, pTop.cy);
+    ctx.lineTo(pBottom.cx, pBottom.cy);
+    ctx.stroke();
+
+    ctx.fillText(gx.toString(), pBottom.cx - 8, PH_SIZE - 6);
+  }
+
+  // Horizontal grid lines + y labels
+  for (const gy of gridSteps) {
+    const pLeft = gridToCanvas(-1, gy);
+    const pRight = gridToCanvas(1, gy);
+
+    ctx.beginPath();
+    ctx.moveTo(pLeft.cx, pLeft.cy);
+    ctx.lineTo(pRight.cx, pRight.cy);
+    ctx.stroke();
+
+    ctx.fillText(gy.toString(), 4, pLeft.cy + 3);
+  }
+
+  // Main x-axis and y-axis
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 1.5;
+
+  const xAxisLeft = gridToCanvas(-1, 0);
+  const xAxisRight = gridToCanvas(1, 0);
+  ctx.beginPath();
+  ctx.moveTo(xAxisLeft.cx, xAxisLeft.cy);
+  ctx.lineTo(xAxisRight.cx, xAxisRight.cy);
+  ctx.stroke();
+
+  const yAxisTop = gridToCanvas(0, 1);
+  const yAxisBottom = gridToCanvas(0, -1);
+  ctx.beginPath();
+  ctx.moveTo(yAxisTop.cx, yAxisTop.cy);
+  ctx.lineTo(yAxisBottom.cx, yAxisBottom.cy);
+  ctx.stroke();
+
+  // Axis names
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.fillText("x", PH_SIZE - 14, PH_SIZE / 2 - 6);
+  ctx.fillText("y", PH_SIZE / 2 + 6, 12);
+
+  ctx.restore();
+
   // Helper: phantom coords → canvas pixels
   // Phantom: x ∈ [-1,1] left→right, y ∈ [-1,1] bottom→top
   // Canvas:  x ∈ [0,PH_SIZE] left→right, y ∈ [0,PH_SIZE] top→bottom  (flip Y)
@@ -684,7 +752,7 @@ export default function UltrasoundPage() {
           {/* Phantom canvas */}
           <div className="rounded-xl border border-border bg-bg-surface p-3">
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-              Phantom — drag probe on edge · drag vessel · click to inspect · dbl-click to edit
+              Phantom Coordinate Map — drag probe on edge · drag vessel · click to inspect · dbl-click to edit
             </h3>
             <canvas
               ref={phantomRef}
@@ -954,7 +1022,7 @@ export default function UltrasoundPage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                    B-Mode — 2D Spatial Map
+                    B-Mode — 2D Spatial Map with Measurement Grid
                   </span>
                   {bMode && (
                     <span className="ml-2 text-[9px] text-text-muted">

@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { simulate5G } from "@/lib/api";
 import {
-  TOWER_COLORS, USER_COLORS, DEFAULT_TOWERS, DEFAULT_USERS, DEFAULT_OBSTACLES,
+  TOWER_COLORS, USER_COLORS, DEFAULT_TOWERS, DEFAULT_USERS,
   SignalLegend, VizCheckboxes, TowerCard, UserCard,
 } from "./components";
 
@@ -11,29 +11,22 @@ import {
 export default function FiveGPage() {
   const [towers, setTowers] = useState(DEFAULT_TOWERS);
   const [users, setUsers] = useState(DEFAULT_USERS);
-  const [obstacles, setObstacles] = useState(DEFAULT_OBSTACLES);
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [globalSnr, setGlobalSnr] = useState(250);
-  const [globalWindow, setGlobalWindow] = useState("kaiser");
-  const [globalBeta, setGlobalBeta] = useState(6.0);
-  const [addObstacleMode, setAddObstacleMode] = useState(false);
   const [viz, setViz] = useState<Record<string, boolean>>({
     beams: true, sidelobes: true, coverage: true, connections: true, grid: true,
   });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const draggingTowerRef = useRef<number | null>(null);
   const draggingUserRef = useRef<number | null>(null);
-  const draggingObstacleRef = useRef<number | null>(null);
   const towersRef = useRef(towers);
   const usersRef = useRef(users);
-  const obstaclesRef = useRef(obstacles);
   towersRef.current = towers;
   usersRef.current = users;
-  obstaclesRef.current = obstacles;
 
   const abortRef = useRef<AbortController | null>(null);
-  const runSim = useCallback(async (t: typeof towers, u: typeof users, obs?: typeof obstacles) => {
+  const runSim = useCallback(async (t: typeof towers, u: typeof users) => {
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -43,28 +36,28 @@ export default function FiveGPage() {
       const towersWithGlobals = t.map(tw => ({
         ...tw,
         snr: globalSnr >= 1000 ? 1000 : globalSnr,
-        window_type: globalWindow,
-        kaiser_beta: globalBeta,
+        window_type: "kaiser",
+        kaiser_beta: tw.kaiser_beta ?? 6.0,
       }));
       const data = await simulate5G({
         towers: towersWithGlobals,
         users: u,
-        obstacles: obs ?? obstaclesRef.current,
+
       });
       if (!controller.signal.aborted) setResult(data);
     } catch (e: any) {
       if (e?.name !== "AbortError") console.warn("5G sim error:", e?.message);
     }
     if (!controller.signal.aborted) setLoading(false);
-  }, [globalSnr, globalWindow, globalBeta]);
+  }, [globalSnr]);
 
-  useEffect(() => { runSim(towers, users, obstacles); }, []);
+  useEffect(() => { runSim(towers, users); }, []);
 
   const debRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
     if (debRef.current) clearTimeout(debRef.current);
-    debRef.current = setTimeout(() => runSim(towers, users, obstacles), 400);
-  }, [towers, obstacles, globalSnr, globalWindow, globalBeta]);
+    debRef.current = setTimeout(() => runSim(towers, users), 400);
+  }, [towers, users, globalSnr]);
 
 
   // Keyboard
@@ -119,42 +112,6 @@ export default function FiveGPage() {
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = canvasToSim(e.clientX, e.clientY);
 
-    // Right-click to remove obstacle
-    if (e.button === 2) {
-      const obs = obstaclesRef.current;
-      for (let i = 0; i < obs.length; i++) {
-        const o = obs[i];
-        if (Math.abs(x - o.x) < o.width / 2 && Math.abs(y - o.y) < o.height / 2) {
-          setObstacles(prev => prev.filter((_, idx) => idx !== i));
-          e.preventDefault();
-          return;
-        }
-      }
-      return;
-    }
-
-    // Add obstacle mode — TOP PRIORITY: place obstacle anywhere
-    if (addObstacleMode && obstaclesRef.current.length < 5) {
-      const newId = obstaclesRef.current.length > 0
-        ? Math.max(...obstaclesRef.current.map(o => o.id)) + 1
-        : 0;
-      setObstacles(prev => [...prev, { id: newId, x, y, width: 60, height: 60, reflection_loss_db: 6 }]);
-      setAddObstacleMode(false);
-      e.preventDefault();
-      return;
-    }
-
-    // Check obstacles for dragging
-    const obs = obstaclesRef.current;
-    for (let i = 0; i < obs.length; i++) {
-      const o = obs[i];
-      if (Math.abs(x - o.x) < o.width / 2 && Math.abs(y - o.y) < o.height / 2) {
-        draggingObstacleRef.current = i;
-        e.preventDefault();
-        return;
-      }
-    }
-
     // Check towers
     const tRes = result?.towers || [];
     for (let i = 0; i < tRes.length; i++) {
@@ -168,14 +125,11 @@ export default function FiveGPage() {
       const dx = x - u[i].x, dy = y - u[i].y;
       if (Math.sqrt(dx * dx + dy * dy) < 18) { draggingUserRef.current = i; e.preventDefault(); return; }
     }
-  }, [canvasToSim, result, addObstacleMode]);
+  }, [canvasToSim, result]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = canvasToSim(e.clientX, e.clientY);
-    if (draggingObstacleRef.current !== null) {
-      const i = draggingObstacleRef.current;
-      setObstacles(prev => prev.map((o, idx) => idx === i ? { ...o, x: Math.max(40, Math.min(760, x)), y: Math.max(40, Math.min(760, y)) } : o));
-    } else if (draggingTowerRef.current !== null) {
+    if (draggingTowerRef.current !== null) {
       const i = draggingTowerRef.current;
       setTowers(prev => prev.map((t, idx) => idx === i ? { ...t, position: { x: Math.max(20, Math.min(780, x)), y: Math.max(20, Math.min(780, y)) } } : t));
     } else if (draggingUserRef.current !== null) {
@@ -185,11 +139,10 @@ export default function FiveGPage() {
   }, [canvasToSim]);
 
   const handleMouseUp = useCallback(() => {
-    const wasDragging = draggingTowerRef.current !== null || draggingUserRef.current !== null || draggingObstacleRef.current !== null;
+    const wasDragging = draggingTowerRef.current !== null || draggingUserRef.current !== null;
     draggingTowerRef.current = null;
     draggingUserRef.current = null;
-    draggingObstacleRef.current = null;
-    if (wasDragging) runSim(towersRef.current, usersRef.current, obstaclesRef.current);
+    if (wasDragging) runSim(towersRef.current, usersRef.current);
   }, [runSim]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => { e.preventDefault(); }, []);
@@ -256,49 +209,62 @@ export default function FiveGPage() {
       });
     }
 
-    // ── Beam patterns ──
+    // ── Beam patterns (MU-MIMO: one beam per connected user) ──
     if (viz.beams) {
       towerResults.forEach((t: any, i: number) => {
         const tx = sx(t.position.x), ty = sy(t.position.y);
         const maxR = t.coverage_radius * scale;
+        const conns: any[] = t.connections || [];
         const beams: any[] = t.user_beams || [];
-        const beamsToDraw = beams.length > 0 ? beams : [{ beam_profile: t.beam_profile, steering_angle: 0 }];
 
-        beamsToDraw.forEach((beam: any) => {
-          const profile = beam.beam_profile;
-          if (!profile?.angles || !profile?.magnitudes_db) return;
+        // Collect beam renders: one per connected user, or the idle beam if no users
+        const beamRenders: { profile: any; rotOff: number }[] = [];
+
+        if (conns.length > 0 && beams.length > 0) {
+          // Connected: render a beam for EACH connected user
+          for (const beam of beams) {
+            if (!beam?.beam_profile) continue;
+            const uid = beam.user_id;
+            const u = userResults[uid];
+            let rotOff = 0;
+            if (u) {
+              const dx = sx(u.position.x) - tx;
+              const dy = sy(u.position.y) - ty;
+              const userDirScreen = Math.atan2(dy, dx);
+              const steerRad = (beam.steering_angle || 0) * Math.PI / 180;
+              rotOff = userDirScreen - (Math.PI / 2 - steerRad);
+            }
+            beamRenders.push({ profile: beam.beam_profile, rotOff });
+          }
+        }
+
+        // Fallback: idle beam (no connected users)
+        if (beamRenders.length === 0 && t.beam_profile) {
+          beamRenders.push({ profile: t.beam_profile, rotOff: 0 });
+        }
+
+        // Draw each beam
+        for (const { profile, rotOff } of beamRenders) {
+          if (!profile?.angles || !profile?.magnitudes_db) continue;
           const angles = profile.angles as number[];
           const magsDb = profile.magnitudes_db as number[];
-          const uid = beam.user_id;
-          let canvasDir: number;
-          if (uid !== undefined && userResults[uid]) {
-            const u = userResults[uid];
-            canvasDir = Math.atan2(sy(u.position.y) - ty, sx(u.position.x) - tx);
-          } else {
-            canvasDir = -Math.PI / 2;
-          }
-          const peakRad = (beam.steering_angle || 0) * Math.PI / 180;
-          const rotOff = canvasDir - peakRad;
 
-          // Convert dB to linear amplitude for smooth lobes
           const amps = magsDb.map((db: number) => {
             const clamped = Math.max(-40, Math.min(0, db));
             return Math.pow(10, clamped / 20);
           });
 
-          // Front half: -90° to +90° rotated by rotOff
           ctx.beginPath();
           for (let j = 0; j < angles.length; j++) {
             const amp = amps[j];
             const r = viz.sidelobes ? amp * maxR : (amp > 0.5 ? amp * maxR : amp * maxR * 0.1);
-            const ca = angles[j] * Math.PI / 180 + rotOff;
+            const ca = Math.PI / 2 - angles[j] * Math.PI / 180 + rotOff;
             const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
             j === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
           }
-          // Mirror: back half (reflected, attenuated)
           for (let j = angles.length - 1; j >= 0; j--) {
             const r = amps[j] * maxR * 0.08;
-            const ca = angles[j] * Math.PI / 180 + rotOff + Math.PI;
+            const ca = Math.PI / 2 - angles[j] * Math.PI / 180 + rotOff + Math.PI;
             const px = tx + r * Math.cos(ca), py = ty + r * Math.sin(ca);
             ctx.lineTo(px, py);
           }
@@ -309,42 +275,13 @@ export default function FiveGPage() {
           grad.addColorStop(1, TOWER_COLORS[i] + "05");
           ctx.fillStyle = grad; ctx.fill();
           ctx.strokeStyle = TOWER_COLORS[i] + "55"; ctx.lineWidth = 1; ctx.stroke();
-        });
+        }
       });
     }
 
-    // ── Draw obstacles (buildings) ──
-    obstacles.forEach((obs, i) => {
-      const ox = sx(obs.x), oy = sy(obs.y);
-      const ow = obs.width * scale, oh = obs.height * scale;
 
-      // Building body
-      ctx.fillStyle = "#64748b44";
-      ctx.fillRect(ox - ow / 2, oy - oh / 2, ow, oh);
-      ctx.strokeStyle = "#94a3b888";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(ox - ow / 2, oy - oh / 2, ow, oh);
 
-      // Building icon (grid lines)
-      ctx.strokeStyle = "#94a3b844";
-      ctx.lineWidth = 0.5;
-      for (let r = 1; r < 3; r++) {
-        const ry = oy - oh / 2 + (r / 3) * oh;
-        ctx.beginPath(); ctx.moveTo(ox - ow / 2, ry); ctx.lineTo(ox + ow / 2, ry); ctx.stroke();
-      }
-      for (let c = 1; c < 3; c++) {
-        const cx2 = ox - ow / 2 + (c / 3) * ow;
-        ctx.beginPath(); ctx.moveTo(cx2, oy - oh / 2); ctx.lineTo(cx2, oy + oh / 2); ctx.stroke();
-      }
-
-      // Label
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = `bold ${9 * scale}px sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(`B${i + 1}`, ox, oy + 3 * scale);
-    });
-
-    // ── Connection lines (LOS + NLOS paths) ──
+    // ── Connection lines (LOS) ──
     if (viz.connections) {
       towerResults.forEach((t: any, i: number) => {
         (t.connections || []).forEach((conn: any) => {
@@ -352,64 +289,24 @@ export default function FiveGPage() {
           if (!u) return;
           const tpx = sx(t.position.x), tpy = sy(t.position.y);
           const upx = sx(u.position.x), upy = sy(u.position.y);
-          const paths: any[] = conn.paths || [];
 
-          if (paths.length === 0) {
-            // Fallback: simple direct line
-            ctx.beginPath();
-            ctx.moveTo(tpx, tpy); ctx.lineTo(upx, upy);
-            ctx.strokeStyle = USER_COLORS[conn.user_id] + "88";
-            ctx.lineWidth = 2;
-            ctx.stroke();
-          }
-
-          paths.forEach((p: any) => {
-            const isLOS = p.type === "LOS";
-            const color = isLOS ? "#22c55e" : "#f59e0b";
-
-            ctx.save();
-            ctx.shadowColor = color;
-            ctx.shadowBlur = 6;
-
-            if (isLOS) {
-              // Solid line: tower → user
-              ctx.beginPath();
-              ctx.moveTo(tpx, tpy); ctx.lineTo(upx, upy);
-              ctx.strokeStyle = color + "cc";
-              ctx.lineWidth = 2;
-              ctx.setLineDash([]);
-              ctx.stroke();
-            } else if (p.via) {
-              // Dashed line: tower → bounce → user
-              const vx = sx(p.via.x), vy = sy(p.via.y);
-              ctx.beginPath();
-              ctx.moveTo(tpx, tpy); ctx.lineTo(vx, vy); ctx.lineTo(upx, upy);
-              ctx.strokeStyle = color + "cc";
-              ctx.lineWidth = 1.5;
-              ctx.setLineDash([6, 4]);
-              ctx.stroke();
-              ctx.setLineDash([]);
-
-              // Bounce point diamond
-              ctx.fillStyle = color;
-              ctx.beginPath();
-              ctx.moveTo(vx, vy - 5 * scale);
-              ctx.lineTo(vx + 5 * scale, vy);
-              ctx.lineTo(vx, vy + 5 * scale);
-              ctx.lineTo(vx - 5 * scale, vy);
-              ctx.closePath();
-              ctx.fill();
-            }
-            ctx.restore();
-          });
+          // Direct LOS line
+          ctx.save();
+          ctx.shadowColor = "#22c55e";
+          ctx.shadowBlur = 6;
+          ctx.beginPath();
+          ctx.moveTo(tpx, tpy); ctx.lineTo(upx, upy);
+          ctx.strokeStyle = "#22c55ecc";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.restore();
 
           // Signal label at midpoint
           const mx = (tpx + upx) / 2, my = (tpy + upy) / 2;
-          const pathType = conn.los_blocked ? "NLOS" : "LOS";
           ctx.fillStyle = "#e2e5ed";
           ctx.font = `${9 * scale}px monospace`;
           ctx.textAlign = "center";
-          ctx.fillText(`${conn.distance} m (${pathType})`, mx, my - 6 * scale);
+          ctx.fillText(`${conn.distance} m (LOS)`, mx, my - 6 * scale);
           ctx.fillStyle = conn.signal_dbm > -60 ? "#22c55e" : conn.signal_dbm > -90 ? "#f59e0b" : "#ef4444";
           ctx.fillText(`${conn.signal_dbm} dBm`, mx, my + 6 * scale);
         });
@@ -455,7 +352,7 @@ export default function FiveGPage() {
       ctx.textBaseline = "alphabetic";
     });
 
-  }, [result, users, obstacles, viz]);
+  }, [result, users, viz]);
 
   const updateTowerParam = (i: number, key: string, value: number) => {
     setTowers(prev => prev.map((t, idx) => idx === i ? { ...t, [key]: value } : t));
@@ -464,26 +361,27 @@ export default function FiveGPage() {
   const resetAll = () => {
     setTowers(DEFAULT_TOWERS);
     setUsers(DEFAULT_USERS);
-    setObstacles(DEFAULT_OBSTACLES);
     setGlobalSnr(250);
-    setGlobalWindow("kaiser");
-    setGlobalBeta(6.0);
-    setAddObstacleMode(false);
-    setTimeout(() => runSim(DEFAULT_TOWERS, DEFAULT_USERS, DEFAULT_OBSTACLES), 50);
+    setTimeout(() => runSim(DEFAULT_TOWERS, DEFAULT_USERS), 50);
   };
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 44px)", overflow: "hidden" }}>
-      {/* Top bar with SNR */}
-      <div className="flex items-center justify-end px-5 py-1.5" style={{ borderBottom: "1px solid #1a1f2e" }}>
-        <div className="snr-control">
-          <label>SNR</label>
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-green" />
-          <input type="range" min={0} max={1000} step={10} value={globalSnr}
-            onChange={e => setGlobalSnr(Number(e.target.value))} />
-          <span className="snr-value">{globalSnr}</span>
+      {/* Top bar */}
+      <div className="flex items-center justify-between px-5 py-1.5" style={{ borderBottom: "1px solid #1a1f2e" }}>
+        <button onClick={resetAll}
+          className="rounded-md border border-border bg-bg-surface px-3 py-1 text-[11px] text-text-muted hover:text-text-primary hover:border-red-500/50 transition-colors">
+          ↺ Reset All
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="snr-control">
+            <label>SNR</label>
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent-green" />
+            <input type="range" min={0} max={1000} step={10} value={globalSnr}
+              onChange={e => setGlobalSnr(Number(e.target.value))} />
+            <span className="snr-value">{globalSnr}</span>
+          </div>
         </div>
-        <button className="ml-3 text-text-muted hover:text-text-secondary text-sm">⚙</button>
       </div>
 
       {/* Main content */}
@@ -495,8 +393,8 @@ export default function FiveGPage() {
             <VizCheckboxes viz={viz} setViz={setViz} />
             <canvas
               ref={canvasRef}
-              className={`rounded-xl w-full h-full ${addObstacleMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
-              style={{ border: addObstacleMode ? "1px solid #f59e0b66" : "1px solid #1a1f2e" }}
+              className="rounded-xl w-full h-full cursor-grab active:cursor-grabbing"
+              style={{ border: "1px solid #1a1f2e" }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -505,16 +403,6 @@ export default function FiveGPage() {
             />
             {/* Bottom canvas controls */}
             <div className="absolute bottom-3 right-3 flex items-center gap-2" style={{ zIndex: 10 }}>
-              <button
-                className={`rounded-md border px-2.5 py-1 text-[10px] flex items-center gap-1 transition-colors ${
-                  addObstacleMode
-                    ? 'border-amber-500 bg-amber-500/20 text-amber-300'
-                    : 'border-border bg-bg-surface/90 backdrop-blur-sm text-text-muted hover:text-text-primary'
-                }`}
-                onClick={() => setAddObstacleMode(!addObstacleMode)}
-              >
-                <span>🏢</span> {addObstacleMode ? 'Click to place…' : `Add Obstacle (${obstacles.length}/5)`}
-              </button>
               <button className="rounded-md border border-border bg-bg-surface/90 backdrop-blur-sm px-2.5 py-1 text-[10px] text-text-muted hover:text-text-primary flex items-center gap-1">
                 <span>⊞</span> Array Factor (dB)
               </button>
@@ -529,9 +417,7 @@ export default function FiveGPage() {
               <span className="inline-block h-2 w-2 rounded-full" style={{ background: USER_COLORS[1] }} />
               User 2: WASD
             </span>
-            <span className="flex items-center gap-1">
-              <span className="text-amber-400">🏢</span> Right-click to remove
-            </span>
+
           </div>
         </div>
 
@@ -543,7 +429,8 @@ export default function FiveGPage() {
             <div className="space-y-3">
               {towers.map((tower, i) => (
                 <TowerCard key={i} tower={tower} tResult={(result?.towers || [])[i]}
-                  index={i} updateParam={updateTowerParam} />
+                  index={i} updateParam={updateTowerParam}
+                  userPositions={users.map(u => ({x: u.x, y: u.y}))} />
               ))}
             </div>
           </div>
@@ -558,43 +445,6 @@ export default function FiveGPage() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Global Parameters Bar */}
-      <div className="global-param-bar">
-        <div className="param-item">
-          <span className="param-label">Elements</span>
-          <span className="param-value">{towers[0]?.num_elements || 32}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Spacing (λ)</span>
-          <span className="param-value">{towers[0]?.element_spacing || 0.5}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Frequency</span>
-          <span className="param-value">{((towers[0]?.frequency || 28e9) / 1e9).toFixed(1)} GHz</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">SNR</span>
-          <span className="param-value">{globalSnr}</span>
-        </div>
-        <div className="param-item">
-          <span className="param-label">Window</span>
-          <select value={globalWindow} onChange={e => setGlobalWindow(e.target.value)}>
-            <option value="kaiser">Kaiser (β)</option>
-            <option value="hamming">Hamming</option>
-            <option value="hanning">Hanning</option>
-            <option value="blackman">Blackman</option>
-            <option value="rectangular">Rectangular</option>
-          </select>
-        </div>
-        <div className="param-item">
-          <span className="param-label">β</span>
-          <span className="param-value">{globalBeta.toFixed(1)}</span>
-          <input type="range" min={0} max={20} step={0.5} value={globalBeta}
-            onChange={e => setGlobalBeta(Number(e.target.value))} />
-        </div>
-        <button onClick={resetAll}>Reset All</button>
       </div>
     </div>
   );
