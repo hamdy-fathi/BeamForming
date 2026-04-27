@@ -55,21 +55,9 @@ class TowerConfig(BaseModel):
     power_dbm: float = Field(30.0, ge=0, le=50)
     kaiser_beta: float = Field(6.0, ge=0, le=20)
 
-
-class ObstacleConfig(BaseModel):
-    """A rectangular obstacle that blocks LOS and produces reflections."""
-    id: int = Field(ge=0)
-    x: float  # center x
-    y: float  # center y
-    width: float = Field(60.0, ge=20, le=200)
-    height: float = Field(60.0, ge=20, le=200)
-    reflection_loss_db: float = Field(6.0, ge=0, le=20)  # loss per bounce
-
-
 class FiveGRequest(BaseModel):
     towers: list[TowerConfig] = Field(..., min_length=3, max_length=3)
     users: list[Position] = Field(..., min_length=1, max_length=2)
-    obstacles: list[ObstacleConfig] = Field(default_factory=list, max_length=5)
 
 
 class UserMoveRequest(BaseModel):

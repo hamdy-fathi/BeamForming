@@ -15,7 +15,6 @@ export const DEFAULT_USERS = [
   { x: 450, y: 380 },
 ];
 
-export const DEFAULT_OBSTACLES: { id: number; x: number; y: number; width: number; height: number; reflection_loss_db: number }[] = [];
 
 /* ── Tower Param Row ─────────────────────────────────── */
 export function TowerParamRow({ label, value, min, max, step, unit, onChange, color }: {

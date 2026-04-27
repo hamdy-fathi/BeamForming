@@ -1,10 +1,8 @@
 """
-5G tower connectivity simulator — physics-accurate beamforming
-with multi-path propagation and obstacle scattering.
+5G tower connectivity simulator — physics-accurate beamforming.
 
-Signal model (per path):
-  P_path = P_tx + G_array(θ_departure) - FSPL(d_total, f) + reflection_loss
-  P_total = 10·log10(Σ 10^(P_path_i / 10))   (incoherent power sum)
+Signal model:
+  P_rx = P_tx + G_peak - FSPL(d, f)
 
 Multi-user: power is split equally (-3 dB per additional user).
 """
@@ -29,224 +27,15 @@ def _distance(a: tuple, b: tuple) -> float:
     return np.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
 
 
-# ── Ray-Rectangle intersection ───────────────────────────────────────────
-def _segment_intersects_rect(p1: tuple, p2: tuple, obs: dict) -> bool:
-    """Check if line segment p1→p2 intersects the axis-aligned rectangle."""
-    cx, cy = obs["x"], obs["y"]
-    hw, hh = obs["width"] / 2, obs["height"] / 2
-    x_min, x_max = cx - hw, cx + hw
-    y_min, y_max = cy - hh, cy + hh
-
-    dx = p2[0] - p1[0]
-    dy = p2[1] - p1[1]
-
-    # Parametric clipping (Liang-Barsky)
-    p = [-dx, dx, -dy, dy]
-    q = [p1[0] - x_min, x_max - p1[0], p1[1] - y_min, y_max - p1[1]]
-
-    t_enter = 0.0
-    t_exit = 1.0
-
-    for i in range(4):
-        if abs(p[i]) < 1e-10:
-            if q[i] < 0:
-                return False  # parallel and outside
-        else:
-            t = q[i] / p[i]
-            if p[i] < 0:
-                t_enter = max(t_enter, t)
-            else:
-                t_exit = min(t_exit, t)
-            if t_enter > t_exit:
-                return False
-
-    return t_enter <= t_exit
-
-
-def _is_los_blocked(p1: tuple, p2: tuple, obstacles: list[dict]) -> bool:
-    """Check if any obstacle blocks the line-of-sight from p1 to p2."""
-    for obs in obstacles:
-        if _segment_intersects_rect(p1, p2, obs):
-            return True
-    return False
-
-
-# ── Single-bounce specular reflection ────────────────────────────────────
-def _reflect_point_on_segment(p: tuple, seg_start: tuple, seg_end: tuple) -> tuple | None:
-    """Reflect point p across the line defined by seg_start→seg_end.
-    Returns the mirror point, or None if the segment is degenerate.
-    """
-    sx, sy = seg_start
-    ex, ey = seg_end
-    dx, dy = ex - sx, ey - sy
-    len_sq = dx * dx + dy * dy
-    if len_sq < 1e-10:
-        return None
-    t = ((p[0] - sx) * dx + (p[1] - sy) * dy) / len_sq
-    # Foot of perpendicular
-    fx = sx + t * dx
-    fy = sy + t * dy
-    # Mirror
-    return (2 * fx - p[0], 2 * fy - p[1])
-
-
-def _find_reflection_paths(tower_pos: tuple, user_pos: tuple,
-                            obstacles: list[dict]) -> list[dict]:
-    """Find single-bounce specular reflection paths off obstacle edges.
-
-    For each of the 4 edges of each obstacle:
-      1. Mirror the user across the edge
-      2. Check if tower→mirror line intersects the edge (reflection point exists)
-      3. Check if neither leg is blocked by other obstacles
-      4. If valid, record the reflection path
-
-    Returns list of {via, total_distance, angle_at_tower, reflection_loss_db, obstacle_id}
-    """
-    paths = []
-
-    for obs in obstacles:
-        cx, cy = obs["x"], obs["y"]
-        hw, hh = obs["width"] / 2, obs["height"] / 2
-        refl_loss = obs.get("reflection_loss_db", 6.0)
-
-        # 4 edges: top, bottom, left, right
-        edges = [
-            ((cx - hw, cy - hh), (cx + hw, cy - hh)),  # top edge
-            ((cx - hw, cy + hh), (cx + hw, cy + hh)),  # bottom edge
-            ((cx - hw, cy - hh), (cx - hw, cy + hh)),  # left edge
-            ((cx + hw, cy - hh), (cx + hw, cy + hh)),  # right edge
-        ]
-
-        for seg_start, seg_end in edges:
-            # Mirror user across this edge
-            mirror = _reflect_point_on_segment(user_pos, seg_start, seg_end)
-            if mirror is None:
-                continue
-
-            # Find where tower→mirror intersects the edge line
-            # The reflection point is the intersection of tower→mirror with the edge
-            tx, ty = tower_pos
-            mx, my = mirror
-
-            dx_tm = mx - tx
-            dy_tm = my - ty
-
-            # Parametric intersection with the edge segment
-            ex, ey = seg_start
-            edx = seg_end[0] - ex
-            edy = seg_end[1] - ey
-
-            denom = dx_tm * edy - dy_tm * edx
-            if abs(denom) < 1e-10:
-                continue  # parallel
-
-            t_ray = ((ex - tx) * edy - (ey - ty) * edx) / denom
-            t_edge = ((ex - tx) * dy_tm - (ey - ty) * dx_tm) / denom
-
-            if t_ray < 0.01 or t_edge < 0 or t_edge > 1:
-                continue  # reflection point not on edge or behind tower
-
-            # Reflection point
-            rx = tx + t_ray * dx_tm
-            ry = ty + t_ray * dy_tm
-            refl_point = (rx, ry)
-
-            # Check neither leg is blocked by OTHER obstacles
-            other_obs = [o for o in obstacles if o["id"] != obs["id"]]
-            if _is_los_blocked(tower_pos, refl_point, other_obs):
-                continue
-            if _is_los_blocked(refl_point, user_pos, other_obs):
-                continue
-
-            # Also check the reflection point → user isn't blocked by THIS obstacle
-            # Use a generous offset (5 sim units) to avoid edge-touching false positives
-            offset_start = (
-                refl_point[0] + (user_pos[0] - refl_point[0]) * 0.05,
-                refl_point[1] + (user_pos[1] - refl_point[1]) * 0.05,
-            )
-            if _segment_intersects_rect(offset_start, user_pos, obs):
-                continue
-
-            # Valid reflection path
-            d1 = _distance(tower_pos, refl_point)
-            d2 = _distance(refl_point, user_pos)
-            total_dist = d1 + d2
-            angle_at_tower = _canvas_angle_to_user(tower_pos, refl_point)
-
-            paths.append({
-                "via": refl_point,
-                "total_distance": total_dist,
-                "angle_at_tower": angle_at_tower,
-                "reflection_loss_db": refl_loss,
-                "obstacle_id": obs["id"],
-            })
-
-    return paths
-
-
-def _find_diffraction_paths(tower_pos: tuple, user_pos: tuple,
-                             obstacles: list[dict]) -> list[dict]:
-    """Find knife-edge diffraction paths around obstacle corners.
-
-    When LOS is blocked, the signal can bend around obstacle corners.
-    For each corner of each obstacle:
-      1. Offset the corner slightly outward (to clear the obstacle surface)
-      2. Check if tower→corner and corner→user are both clear
-      3. If valid, record the diffraction path with loss penalty
-
-    Returns list of {via, total_distance, angle_at_tower, reflection_loss_db, obstacle_id}
-    """
-    paths = []
-    CORNER_OFFSET = 5.0  # offset from corner to clear the surface
-
-    for obs in obstacles:
-        cx, cy = obs["x"], obs["y"]
-        hw, hh = obs["width"] / 2, obs["height"] / 2
-        diff_loss = obs.get("reflection_loss_db", 6.0)  # reuse reflection loss
-
-        # 4 corners with slight outward offset to clear the obstacle body
-        corners = [
-            (cx - hw - CORNER_OFFSET, cy - hh - CORNER_OFFSET),  # top-left
-            (cx + hw + CORNER_OFFSET, cy - hh - CORNER_OFFSET),  # top-right
-            (cx - hw - CORNER_OFFSET, cy + hh + CORNER_OFFSET),  # bottom-left
-            (cx + hw + CORNER_OFFSET, cy + hh + CORNER_OFFSET),  # bottom-right
-        ]
-
-        for corner in corners:
-            # Check if tower→corner is clear of ALL obstacles
-            if _is_los_blocked(tower_pos, corner, obstacles):
-                continue
-            # Check if corner→user is clear of ALL obstacles
-            if _is_los_blocked(corner, user_pos, obstacles):
-                continue
-
-            d1 = _distance(tower_pos, corner)
-            d2 = _distance(corner, user_pos)
-            total_dist = d1 + d2
-            angle_at_tower = _canvas_angle_to_user(tower_pos, corner)
-
-            paths.append({
-                "via": corner,
-                "total_distance": total_dist,
-                "angle_at_tower": angle_at_tower,
-                "reflection_loss_db": diff_loss,
-                "obstacle_id": obs["id"],
-            })
-
-    # Return only the best 2 diffraction paths (shortest total distance)
-    paths.sort(key=lambda p: p["total_distance"])
-    return paths[:2]
-
 
 class FiveGSimulator:
     """
-    3 towers, 2 users, up to 5 obstacles.
+    3 towers, 2 users.
 
     Physics:
     - Each tower has a ULA phased array with user-controlled steering
-    - Direct (LOS) and reflected (NLOS) signal paths
-    - Signal per path = Ptx + G(θ) - FSPL(d, f) - reflection_loss
-    - Multi-path: incoherent power sum of all paths
+    - Direct (LOS) signal path
+    - Signal = Ptx + G_peak - FSPL(d, f)
     - Connectivity requires: within coverage radius AND total signal > -100 dBm
     """
 
@@ -255,10 +44,8 @@ class FiveGSimulator:
     def __init__(self):
         self.towers: list[dict] = []
         self.users: list[dict] = []
-        self.obstacles: list[dict] = []
 
-    def setup(self, towers: list[dict], users: list[dict],
-              obstacles: list[dict] | None = None):
+    def setup(self, towers: list[dict], users: list[dict]):
         self.towers = []
         for i, t in enumerate(towers):
             pos = (t["position"]["x"], t["position"]["y"])
@@ -292,7 +79,6 @@ class FiveGSimulator:
             })
 
         self.users = [{"id": i, "position": (u["x"], u["y"])} for i, u in enumerate(users)]
-        self.obstacles = obstacles or []
 
     def _array_gain_db(self, sim: BeamformingSimulator, theta_deg: float) -> float:
         """Compute array gain at a specific angle in dB: 20*log10(|AF(θ)|)."""
@@ -318,87 +104,29 @@ class FiveGSimulator:
             return 10.0
         return float(angles[above[-1]] - angles[above[0]])
 
-    def _compute_multipath_signal(self, sim, power_dbm, tower_pos, user_pos):
-        """Compute signal via all available paths (LOS + NLOS reflections).
+    def _compute_signal(self, sim, power_dbm, tower_pos, user_pos):
+        """Compute LOS signal strength.
 
-        Returns (total_signal_dbm, paths_info_list)
+        Returns (signal_dbm, path_info)
         """
         freq = sim.frequency
-        paths_info = []
-        path_powers_linear = []
-
-        # ── Direct path (LOS) ──
-        los_blocked = _is_los_blocked(tower_pos, user_pos, self.obstacles)
         dist = _distance(tower_pos, user_pos)
-        angle_to_user = _canvas_angle_to_user(tower_pos, user_pos)
 
-        if not los_blocked:
-            array_gain = self._peak_gain_db(sim)
-            fspl = free_space_path_loss(max(dist, 1.0), freq)
-            signal_dbm = power_dbm + array_gain - fspl
-            path_powers_linear.append(10 ** (signal_dbm / 10))
-            paths_info.append({
-                "type": "LOS",
-                "from": tower_pos,
-                "to": user_pos,
-                "via": None,
-                "distance": round(dist, 1),
-                "signal_dbm": round(signal_dbm, 1),
-                "array_gain_db": round(array_gain, 1),
-                "fspl_db": round(free_space_path_loss(max(dist, 1.0), freq), 1),
-                "reflection_loss_db": 0,
-            })
+        array_gain = self._peak_gain_db(sim)
+        fspl = free_space_path_loss(max(dist, 1.0), freq)
+        signal_dbm = power_dbm + array_gain - fspl
 
-        # ── Reflection paths (NLOS) ──
-        refl_paths = _find_reflection_paths(tower_pos, user_pos, self.obstacles)
-        for rp in refl_paths:
-            angle_at_tower = rp["angle_at_tower"]
-            array_gain = self._peak_gain_db(sim)
-            fspl = free_space_path_loss(max(rp["total_distance"], 1.0), freq)
-            signal_dbm = power_dbm + array_gain - fspl - rp["reflection_loss_db"]
-            path_powers_linear.append(10 ** (signal_dbm / 10))
-            paths_info.append({
-                "type": "NLOS",
-                "from": tower_pos,
-                "to": user_pos,
-                "via": {"x": round(rp["via"][0], 1), "y": round(rp["via"][1], 1)},
-                "distance": round(rp["total_distance"], 1),
-                "signal_dbm": round(signal_dbm, 1),
-                "array_gain_db": round(array_gain, 1),
-                "fspl_db": round(fspl, 1),
-                "reflection_loss_db": round(rp["reflection_loss_db"], 1),
-                "obstacle_id": rp["obstacle_id"],
-            })
+        path_info = {
+            "type": "LOS",
+            "from": tower_pos,
+            "to": user_pos,
+            "distance": round(dist, 1),
+            "signal_dbm": round(signal_dbm, 1),
+            "array_gain_db": round(array_gain, 1),
+            "fspl_db": round(free_space_path_loss(max(dist, 1.0), freq), 1),
+        }
 
-        # ── Diffraction paths (around corners) ──
-        diff_paths = _find_diffraction_paths(tower_pos, user_pos, self.obstacles)
-        for dp in diff_paths:
-            angle_at_tower = dp["angle_at_tower"]
-            array_gain = self._peak_gain_db(sim)
-            fspl = free_space_path_loss(max(dp["total_distance"], 1.0), freq)
-            signal_dbm = power_dbm + array_gain - fspl - dp["reflection_loss_db"]
-            path_powers_linear.append(10 ** (signal_dbm / 10))
-            paths_info.append({
-                "type": "NLOS",
-                "from": tower_pos,
-                "to": user_pos,
-                "via": {"x": round(dp["via"][0], 1), "y": round(dp["via"][1], 1)},
-                "distance": round(dp["total_distance"], 1),
-                "signal_dbm": round(signal_dbm, 1),
-                "array_gain_db": round(array_gain, 1),
-                "fspl_db": round(fspl, 1),
-                "reflection_loss_db": round(dp["reflection_loss_db"], 1),
-                "obstacle_id": dp["obstacle_id"],
-            })
-
-        # ── Total received power (incoherent sum) ──
-        if path_powers_linear:
-            total_linear = sum(path_powers_linear)
-            total_dbm = 10 * np.log10(total_linear + 1e-30)
-        else:
-            total_dbm = -200  # no path at all
-
-        return total_dbm, paths_info, los_blocked
+        return signal_dbm, path_info
 
     def simulate(self) -> dict:
         # Reset connections
@@ -424,7 +152,7 @@ class FiveGSimulator:
                 if dist > t["coverage_radius"]:
                     continue
 
-                total_signal, _, _ = self._compute_multipath_signal(
+                total_signal, _ = self._compute_signal(
                     sim, power_dbm, t["position"], u["position"])
 
                 if total_signal > -100:
@@ -456,8 +184,8 @@ class FiveGSimulator:
                 angle_to_user = _canvas_angle_to_user(t["position"], upos)
                 dist = _distance(t["position"], upos)
 
-                # Multi-path signal computation
-                total_signal, paths_info, los_blocked = self._compute_multipath_signal(
+                # Signal computation
+                total_signal, path_info = self._compute_signal(
                     sim, power_dbm, t["position"], upos)
                 total_signal += split_penalty_db
 
@@ -483,8 +211,7 @@ class FiveGSimulator:
                     "steering_angle": round(angle_to_user, 2),
                     "signal_dbm": round(total_signal, 1),
                     "signal_strength": round(signal_pct, 1),
-                    "los_blocked": los_blocked,
-                    "paths": paths_info,
+                    "path": path_info,
                     "split_penalty_db": round(split_penalty_db, 1),
                 })
 
@@ -535,6 +262,6 @@ class FiveGSimulator:
                 }
                 for us in user_signals
             ],
-            "obstacles": self.obstacles,
+
         }
 
