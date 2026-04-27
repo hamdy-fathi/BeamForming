@@ -166,6 +166,28 @@ class RadarScanRequest(BaseModel):
     targets:        list[RadarTarget] = []
 
 
+class RadarScanSectorRequest(BaseModel):
+    start_angle:     float = Field(0.0,  ge=0,   le=360)
+    end_angle:       float = Field(0.0,  ge=0,   le=360)
+    step_angle:      float = Field(1.0,  gt=0,   le=90)
+    beam_width:      float = Field(10.0, ge=1,   le=90)
+    num_elements:   int   = Field(32,   ge=2,   le=128)
+    element_spacing: float = Field(0.5, ge=0.1, le=2.0)
+    frequency:      float = Field(3e9,  gt=0)
+    window_type:    WindowTypeEnum = WindowTypeEnum.HAMMING
+    snr:            float = Field(200.0, ge=0,  le=1000)
+    targets:        list[RadarTarget] = []
+
+
+class RadarDetectRequest(BaseModel):
+    ppi_data:        list[dict]
+    beam_width:      float = Field(10.0, ge=1,   le=90)
+    frequency:       float = Field(3e9,  gt=0)
+    detection_threshold: float = Field(12.0, ge=0, le=100)
+    targets:         list[RadarTarget] = []
+
+
+
 class RadarFullSweepRequest(BaseModel):
     beam_width:      float = Field(10.0, ge=1,   le=90)
     scan_speed:      float = Field(30.0, ge=1,   le=120)  # RPM

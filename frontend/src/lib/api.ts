@@ -116,3 +116,32 @@ export interface RadarFullSweepPayload {
 export function radarFullSweep(data: RadarFullSweepPayload) {
   return request<any>("/api/radar/full-sweep", { method: "POST", body: JSON.stringify(data) });
 }
+
+export interface RadarScanSectorPayload {
+  start_angle: number;
+  end_angle: number;
+  step_angle: number;
+  beam_width: number;
+  targets: Array<{ id: number; distance: number; angle: number; size: number }>;
+  num_elements: number;
+  element_spacing: number;
+  frequency: number;
+  window_type: string;
+  snr: number;
+}
+
+export function radarScanSector(data: RadarScanSectorPayload) {
+  return request<any>("/api/radar/scan-sector", { method: "POST", body: JSON.stringify(data) });
+}
+
+export interface RadarDetectPayload {
+  ppi_data: Array<{ angle: number; returns: number[] }>;
+  beam_width: number;
+  frequency: number;
+  detection_threshold: number;
+  targets: Array<{ id: number; distance: number; angle: number; size: number }>;
+}
+
+export function radarDetect(data: RadarDetectPayload) {
+  return request<any>("/api/radar/detect", { method: "POST", body: JSON.stringify(data) });
+}

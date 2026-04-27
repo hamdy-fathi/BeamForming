@@ -3,25 +3,23 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import { Detection, PPI_SIZE, MAX_RANGE, polarToXY } from "./helpers";
 
 interface Props {
-  sweepResult: any;
+  ppiBuffer: Array<{angle: number, returns: number[]}>;
   detections: Detection[];
   scanning: boolean;
   scanSpeed: number;
   beamWidth: number;
   sweepAngle: number;
   setSweepAngle: (a: number) => void;
-  onRevealedDetectionIdsChange?: (ids: number[]) => void;
 }
 
 export default function RadarPPI({
-  sweepResult,
+  ppiBuffer,
   detections,
   scanning,
   scanSpeed,
   beamWidth,
   sweepAngle,
   setSweepAngle,
-  onRevealedDetectionIdsChange,
 }: Props) {
   const ppiRef = useRef<HTMLCanvasElement>(null);
   const bbRef = useRef<HTMLCanvasElement | null>(null);
@@ -103,25 +101,16 @@ export default function RadarPPI({
     if (!scanning) return;
     setRevealedTracks([]);
     revealedRef.current = [];
-    onRevealedDetectionIdsChange?.([]);
     angleRef.current = 0;
     setSweepAngle(0);
-  }, [scanning, setSweepAngle, onRevealedDetectionIdsChange]);
+  }, [scanning, setSweepAngle]);
 
   useEffect(() => {
     if (!scanning) {
       revealedRef.current = [];
       setRevealedTracks([]);
-      onRevealedDetectionIdsChange?.([]);
     }
-  }, [scanning, onRevealedDetectionIdsChange]);
-
-  useEffect(() => {
-    const ids = detections
-      .filter((d) => revealedRef.current.some((t) => isTrackMatch(t, d)))
-      .map((d) => d.det_id);
-    onRevealedDetectionIdsChange?.(ids);
-  }, [detections, revealedTracks, isTrackMatch, onRevealedDetectionIdsChange]);
+  }, [scanning]);
 
   // Animation loop
   useEffect(() => {
@@ -190,12 +179,12 @@ export default function RadarPPI({
       const sa = angle * Math.PI / 180 - Math.PI / 2;
 
       // Draw returns at current angle
-      if (sweepResult?.ppi_data) {
-        const closest = sweepResult.ppi_data.reduce((best: any, scan: any) => {
+      if (ppiBuffer && ppiBuffer.length > 0) {
+        const closest = ppiBuffer.reduce((best: any, scan: any) => {
           const diff = Math.abs(((scan.angle - angle + 360) % 360));
           const bestDiff = Math.abs(((best.angle - angle + 360) % 360));
           return diff < bestDiff ? scan : best;
-        }, sweepResult.ppi_data[0]);
+        }, ppiBuffer[0]);
         if (closest) {
           const a = closest.angle * Math.PI / 180 - Math.PI / 2;
           closest.returns.forEach((v: number, i: number) => {
@@ -240,7 +229,7 @@ export default function RadarPPI({
     };
     animRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animRef.current);
-  }, [scanning, scanSpeed, sweepResult, detections, beamWidth, setSweepAngle, drawGrid, drawLabels, isTrackMatch, beamWindow]);
+  }, [scanning, scanSpeed, ppiBuffer, detections, beamWidth, setSweepAngle, drawGrid, drawLabels, isTrackMatch, beamWindow]);
 
   return (
     <div className="flex flex-col items-center">

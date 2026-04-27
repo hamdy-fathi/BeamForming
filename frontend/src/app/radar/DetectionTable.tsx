@@ -4,15 +4,25 @@ import { MatchedDetection } from "./helpers";
 interface Props {
   matched: MatchedDetection[];
   numDetections: number;
-  revealedDetectionIds: number[];
+  ppiBuffer: Array<{angle: number, returns: number[]}>;
   scanning: boolean;
 }
 
-export default function DetectionTable({ matched, numDetections, revealedDetectionIds, scanning }: Props) {
-  if (!matched || matched.length === 0) return null;
+export default function DetectionTable({ matched, numDetections, ppiBuffer, scanning }: Props) {
+  if (!matched || matched.length === 0) return (
+    <div className="rounded-xl border border-border bg-bg-surface p-4 text-center text-text-muted text-xs">
+      Waiting for target analysis...
+    </div>
+  );
 
-  const visibleMatched = matched.filter((m) => !m.detected || (m.det_id != null && revealedDetectionIds.includes(m.det_id)));
-  if (visibleMatched.length === 0 && scanning) return null;
+  // A target is visible if its true_angle is within the angles present in the ppiBuffer
+  const isAngleScanned = (angle: number) => {
+    if (!ppiBuffer || ppiBuffer.length === 0) return false;
+    // Check if the target's angle is close to any angle in the buffer
+    return ppiBuffer.some(p => Math.abs(((p.angle - angle + 180) % 360) - 180) < 15);
+  };
+
+  const visibleMatched = scanning ? matched.filter((m) => m.detected || isAngleScanned(m.true_angle)) : matched;
 
   const detected = visibleMatched.filter(m => m.detected);
   const rate = visibleMatched.length > 0 ? (detected.length / visibleMatched.length * 100).toFixed(0) : "0";

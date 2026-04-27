@@ -61,7 +61,7 @@ class RadarSimulator:
         gain = 10 ** (self.ANTENNA_GAIN_DB / 10.0)
         half_bw = beam_width / 2.0
 
-        range_returns = np.zeros(num_range_bins)
+        range_returns_power = np.zeros(num_range_bins)
         range_axis = np.linspace(0, self.MAX_RANGE, num_range_bins)
 
         for tgt in targets:
@@ -83,23 +83,24 @@ class RadarSimulator:
                 self.TX_POWER, gain * beam_gain, rcs, wl, tgt["distance"]
             )
 
-            # convert to signal level (dB scale, shifted to positive range)
-            # pr is very small at km ranges, so shift by +200 dB
-            signal_level = 10 * np.log10(pr + 1e-30) + 200
-
-            if signal_level > 1:
+            # Check if signal is significant enough before spreading
+            signal_level_check = 10 * np.log10(pr + 1e-30) + 200
+            if signal_level_check > 1:
                 # find range bin for this target
                 bin_idx = int(tgt["distance"] / self.MAX_RANGE * (num_range_bins - 1))
                 bin_idx = np.clip(bin_idx, 0, num_range_bins - 1)
 
-                # add target return with Gaussian spread in range
+                # add target return with Gaussian spread in range (accumulating linear power)
                 spread = max(3, int(tgt["size"] / self.MAX_RANGE * num_range_bins))
                 for di in range(-spread, spread + 1):
                     idx = bin_idx + di
                     if 0 <= idx < num_range_bins:
-                        range_returns[idx] += signal_level * np.exp(
+                        range_returns_power[idx] += pr * np.exp(
                             -0.5 * (di / max(spread / 2, 1)) ** 2
                         )
+
+        # Convert accumulated power to dB scale
+        range_returns = 10 * np.log10(range_returns_power + 1e-30) + 200
 
         # add noise to range returns
         range_returns = add_noise_1d(range_returns, snr)
@@ -110,6 +111,89 @@ class RadarSimulator:
             "beam_width": beam_width,
             "range_returns": range_returns.tolist(),
             "range_axis": range_axis.tolist(),
+        }
+
+    def scan_sector(
+        self,
+        start_angle: float,
+        end_angle: float,
+        step_angle: float,
+        beam_width: float,
+        targets: list[dict],
+        num_elements: int = 32,
+        element_spacing: float = 0.5,
+        frequency: float = 3e9,
+        window_type: str = "hamming",
+        snr: float = 200.0,
+    ) -> list[dict]:
+        """Perform scan over a sector of angles.
+        
+        Returns a list of raw range return profiles.
+        """
+        num_range_bins = 200
+        
+        # Handle wraparound
+        if end_angle < start_angle:
+            end_angle += 360.0
+            
+        # Generate angles, ensuring we don't exceed end_angle
+        angles = np.arange(start_angle, end_angle, step_angle)
+        
+        results = []
+        for a in angles:
+            actual_angle = a % 360.0
+            res = self.scan_at_angle(
+                scan_angle=actual_angle,
+                beam_width=beam_width,
+                targets=targets,
+                num_elements=num_elements,
+                element_spacing=element_spacing,
+                frequency=frequency,
+                window_type=window_type,
+                snr=snr,
+                num_range_bins=num_range_bins,
+            )
+            results.append({
+                "angle": actual_angle,
+                "returns": res["range_returns"]
+            })
+            
+        return results
+
+    def detect_from_buffer(
+        self,
+        ppi_data: list[dict],
+        beam_width: float,
+        frequency: float,
+        targets: list[dict],
+        detection_threshold: float = 12.0,
+    ) -> dict:
+        """Process an accumulated PPI buffer and return matched detections."""
+        num_range_bins = 200
+        
+        estimated_detections = self.detect_targets_from_signal(
+            angle_profiles=ppi_data,
+            beam_width=beam_width,
+            num_range_bins=num_range_bins,
+            frequency=frequency,
+            detection_threshold=detection_threshold,
+        )
+
+        ground_truth = [
+            {
+                "id": t["id"],
+                "distance": t["distance"],
+                "angle": t["angle"],
+                "size": t["size"],
+            }
+            for t in targets
+        ]
+
+        matched = self._match_detections(estimated_detections, ground_truth)
+
+        return {
+            "detections": estimated_detections,
+            "matched": matched,
         }
 
     # ── CFAR-style detection on raw signal ──────────────────────────────
@@ -330,42 +414,41 @@ class RadarSimulator:
         # Compute weighted centroid for each cluster
         detections = []
         for idx, cluster in enumerate(clusters):
-            total_signal = sum(p["signal_level"] for p in cluster)
-            if total_signal < 1e-10:
+            # Convert dB to linear for accurate power-weighted centroid
+            linear_powers = [10.0 ** (p["signal_level"] / 10.0) for p in cluster]
+            total_power = sum(linear_powers)
+            if total_power < 1e-30:
                 continue
 
             # Signal-weighted average for position
             est_range = sum(
-                p["range"] * p["signal_level"] for p in cluster
-            ) / total_signal
+                p["range"] * power for p, power in zip(cluster, linear_powers)
+            ) / total_power
 
             # For angle averaging, handle wrap-around using atan2
             sin_sum = sum(
-                np.sin(np.radians(p["angle"])) * p["signal_level"]
-                for p in cluster
+                np.sin(np.radians(p["angle"])) * power
+                for p, power in zip(cluster, linear_powers)
             )
             cos_sum = sum(
-                np.cos(np.radians(p["angle"])) * p["signal_level"]
-                for p in cluster
+                np.cos(np.radians(p["angle"])) * power
+                for p, power in zip(cluster, linear_powers)
             )
             est_angle = float(np.degrees(np.arctan2(sin_sum, cos_sum))) % 360
 
             max_signal = max(p["signal_level"] for p in cluster)
-            # Robust size estimator:
-            # - use SNR-like contrast above local CFAR noise floor
-            # - include range-bin span (unresolved overlap widens return)
-            # This avoids unstable inverse-physics blowups when returns overlap.
-            signal_samples = np.array([p["signal_level"] for p in cluster], dtype=float)
-            size_signal_db = float(np.percentile(signal_samples, 75))
-            noise_floor_db = float(np.median([p["noise_floor"] for p in cluster]))
-            snr_db = max(size_signal_db - noise_floor_db, 0.0)
-            size_from_signal = 2.8 * np.sqrt(snr_db)
-
-            bin_span = max(p["bin_idx"] for p in cluster) - min(p["bin_idx"] for p in cluster) + 1
+            
+            # Physics-based size estimator
+            # Invert the radar equation to find RCS from peak signal, then size = sqrt(RCS)
+            pr = 10.0 ** ((max_signal - 200.0) / 10.0)
+            wl = wavelength(frequency, SPEED_OF_LIGHT)
+            gain = 10.0 ** (self.ANTENNA_GAIN_DB / 10.0)
+            
+            rcs_est = (pr * (4.0 * np.pi)**3 * (est_range ** 4)) / (self.TX_POWER * gain**2 * wl**2 + 1e-30)
+            est_size = float(np.sqrt(max(rcs_est, 0.0)))
+            
             range_resolution = self.MAX_RANGE / num_range_bins
-            size_from_spread = max(1.0, bin_span * range_resolution / 120.0)
 
-            est_size = float(0.75 * size_from_signal + 0.25 * size_from_spread)
             if not np.isfinite(est_size):
                 est_size = 0.0
 

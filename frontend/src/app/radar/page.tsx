@@ -1,6 +1,6 @@
 "use client";
 import { useState, useCallback, useEffect, useRef } from "react";
-import { radarFullSweep } from "@/lib/api";
+import { radarScanSector, radarDetect } from "@/lib/api";
 import { Target, Detection, MatchedDetection, DEFAULT_TARGETS, MAX_TARGETS } from "./helpers";
 import GroundTruthMap from "./GroundTruthMap";
 import RadarPPI from "./RadarPPI";
@@ -14,73 +14,82 @@ export default function RadarPage() {
   const [snr, setSnr] = useState(200);
   const [windowType, setWindowType] = useState("hamming");
   const [detectionThreshold, setDetectionThreshold] = useState(12);
-  const [sweepResult, setSweepResult] = useState<any>(null);
+  const [ppiBuffer, setPpiBuffer] = useState<Array<{angle: number, returns: number[]}>>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [matched, setMatched] = useState<MatchedDetection[]>([]);
-  const [revealedDetectionIds, setRevealedDetectionIds] = useState<number[]>([]);
   const [sweepAngle, setSweepAngle] = useState(0);
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [editTarget, setEditTarget] = useState<number | null>(null);
-  const autoSweepTimerRef = useRef<number | null>(null);
-
-  const runSweep = useCallback(async () => {
-    setLoading(true);
-    try {
-      const d = await radarFullSweep({
-        beam_width: beamWidth, scan_speed: scanSpeed, targets,
-        num_elements: numElements, element_spacing: 0.5, frequency: 3e9,
-        window_type: windowType, snr, detection_threshold: detectionThreshold,
-      });
-      setSweepResult(d);
-      setDetections(d.detections || []);
-      setMatched(d.matched || []);
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  }, [beamWidth, scanSpeed, targets, numElements, snr, windowType, detectionThreshold]);
+  
+  const lastScanAngleRef = useRef(0);
+  const ppiBufferRef = useRef(ppiBuffer);
+  ppiBufferRef.current = ppiBuffer;
 
   const handleScanToggle = useCallback(async () => {
     if (scanning) {
       setScanning(false);
-      setRevealedDetectionIds([]);
       return;
     }
     setScanning(true);
   }, [scanning]);
 
   useEffect(() => {
-    // If scene changes while scan is stopped, drop stale detections/results.
-    if (scanning) return;
-    setSweepResult(null);
-    setDetections([]);
-    setMatched([]);
-    setRevealedDetectionIds([]);
-    setSweepAngle(0);
-  }, [targets, beamWidth, scanSpeed, numElements, snr, windowType, detectionThreshold, scanning]);
-
-  useEffect(() => {
     if (!scanning) {
-      if (autoSweepTimerRef.current !== null) {
-        window.clearTimeout(autoSweepTimerRef.current);
-        autoSweepTimerRef.current = null;
-      }
+      setPpiBuffer([]);
+      setDetections([]);
+      setMatched([]);
+      setSweepAngle(0);
+      lastScanAngleRef.current = 0;
       return;
     }
 
-    if (autoSweepTimerRef.current !== null) {
-      window.clearTimeout(autoSweepTimerRef.current);
-    }
-    autoSweepTimerRef.current = window.setTimeout(() => {
-      void runSweep();
-    }, 220);
+    const fetchInterval = 250; // ms
+    const scanTimer = setInterval(async () => {
+      const startAngle = lastScanAngleRef.current;
+      const step = (scanSpeed * 360 / 60) * (fetchInterval / 1000);
+      const endAngle = startAngle + step;
+
+      try {
+        const sectorData = await radarScanSector({
+          start_angle: startAngle,
+          end_angle: endAngle % 360,
+          step_angle: Math.max(1, beamWidth / 3),
+          beam_width: beamWidth,
+          targets, num_elements: numElements, element_spacing: 0.5,
+          frequency: 3e9, window_type: windowType, snr
+        });
+        
+        setPpiBuffer(prev => {
+          const next = [...prev, ...sectorData];
+          const maxLen = Math.ceil(360 / Math.max(1, beamWidth / 3)) + 20;
+          return next.slice(-maxLen);
+        });
+      } catch(e) { console.error("radarScanSector error:", e); }
+
+      lastScanAngleRef.current = endAngle % 360;
+    }, fetchInterval);
+
+    const detectTimer = setInterval(async () => {
+      if (ppiBufferRef.current.length === 0) return;
+      try {
+        const d = await radarDetect({
+          ppi_data: ppiBufferRef.current,
+          beam_width: beamWidth,
+          frequency: 3e9,
+          detection_threshold: detectionThreshold,
+          targets
+        });
+        setDetections(d.detections || []);
+        setMatched(d.matched || []);
+      } catch(e) { console.error("radarDetect error:", e); }
+    }, 1000);
 
     return () => {
-      if (autoSweepTimerRef.current !== null) {
-        window.clearTimeout(autoSweepTimerRef.current);
-        autoSweepTimerRef.current = null;
-      }
+      clearInterval(scanTimer);
+      clearInterval(detectTimer);
     };
-  }, [scanning, runSweep]);
+  }, [scanning, scanSpeed, beamWidth, targets, numElements, windowType, snr, detectionThreshold]);
 
   const addTarget = () => {
     if (targets.length >= MAX_TARGETS) return;
@@ -113,14 +122,13 @@ export default function RadarPage() {
         {/* Radar PPI */}
         <div className="rounded-xl border border-green-900/30 bg-bg-surface p-4">
           <RadarPPI
-            sweepResult={sweepResult}
+            ppiBuffer={ppiBuffer}
             detections={detections}
             scanning={scanning}
             scanSpeed={scanSpeed}
             beamWidth={beamWidth}
             sweepAngle={sweepAngle}
             setSweepAngle={setSweepAngle}
-            onRevealedDetectionIdsChange={setRevealedDetectionIds}
           />
         </div>
 
@@ -130,9 +138,6 @@ export default function RadarPage() {
           <div className="flex gap-2">
             <button onClick={handleScanToggle} disabled={loading} className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all disabled:opacity-50 ${scanning ? "bg-red-500/20 text-red-400 border border-red-500/40" : "bg-green-500/20 text-green-400 border border-green-500/40"}`}>
               {scanning ? "⏹ Stop" : "▶ Scan"}
-            </button>
-            <button onClick={runSweep} disabled={loading} className="flex-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-400 font-medium hover:bg-amber-500/20 disabled:opacity-50 transition-all">
-              {loading ? "Computing…" : "⟳ Sweep"}
             </button>
           </div>
 
@@ -212,7 +217,7 @@ export default function RadarPage() {
       <DetectionTable
         matched={matched}
         numDetections={detections.length}
-        revealedDetectionIds={revealedDetectionIds}
+        ppiBuffer={ppiBuffer}
         scanning={scanning}
       />
     </div>
