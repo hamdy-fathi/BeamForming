@@ -15,8 +15,7 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [Demo Preview](#demo-preview)
-- [Main Features](#main-features)
+- [Main Features and Demo Preview](#main-features-and-demo-preview)
 - [Project Modules](#project-modules)
 - [Physics Behind the Simulator](#physics-behind-the-simulator)
 - [Tech Stack](#tech-stack)
@@ -44,11 +43,6 @@ The goal is not only to show final plots, but to let the user change parameters 
 
 ## Demo Preview
 
-### Beamforming Core Demo
-
-<p align="center">
-  <img src="frontend/public/docs/gifs/beamforming-core-demo.gif" alt="Beamforming core demo" width="850">
-</p>
 
 ### 5G Auto-Steering Demo
 
@@ -70,7 +64,13 @@ The goal is not only to show final plots, but to let the user change parameters 
 
 ---
 
-## Main Features
+## Main Features and Demo Preview
+
+# Beamforming Core Demo
+
+<p align="center">
+  <img src="frontend/public/docs/gifs/beamforming-core-demo.gif" alt="Beamforming core demo" width="850">
+</p>
 
 ### General Beamforming Core
 
