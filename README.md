@@ -43,13 +43,11 @@ The goal is not only to show final plots, but to let the user change parameters 
 
 ## Main Features and Demo Preview
 
-### Beamforming Core Demo
+### Beamforming 
 
 <p align="center">
   <img src="frontend/public/docs/gifs/beamforming-core-demo.gif" alt="Beamforming core demo" width="850">
 </p>
-
-### Beamforming Core
 
 - Uniform Linear Array simulation.
 - Real-time control of array parameters.
@@ -60,8 +58,6 @@ The goal is not only to show final plots, but to let the user change parameters 
 - Supported windows include Rectangular, Hamming, Hanning, Blackman, Kaiser, and Tukey.
 
 ### 5G Simulator
-
-### 5G Auto-Steering Demo
 
 <p align="center">
   <img src="frontend/public/docs/gifs/fiveg-auto-steering-demo.gif" alt="5G auto steering demo" width="850">
@@ -78,8 +74,6 @@ The goal is not only to show final plots, but to let the user change parameters 
 
 ### Ultrasound Simulator
 
-### Ultrasound A/B/Doppler Demo
-
 <p align="center">
   <img src="frontend/public/docs/gifs/ultrasound-demo.gif" alt="Ultrasound simulator demo" width="850">
 </p>
@@ -92,8 +86,6 @@ The goal is not only to show final plots, but to let the user change parameters 
 - Uses ultrasound-specific propagation speed and MHz-frequency range.
 
 ### Radar Simulator
-
-### Radar 360° Scan Demo
 
 <p align="center">
   <img src="frontend/public/docs/gifs/radar-scan-demo.gif" alt="Radar simulator demo" width="850">
