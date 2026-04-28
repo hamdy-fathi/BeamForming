@@ -22,7 +22,6 @@
 - [Project Structure](#project-structure)
 - [How to Run the Project](#how-to-run-the-project)
 - [API Endpoints](#api-endpoints)
-- [Screenshots](#screenshots)
 - [Team](#team)
 
 ---
@@ -37,42 +36,23 @@ The project includes a general **2D beamforming core**, then applies the same be
 2. **Medical ultrasound** — a probe scans a tissue phantom using A-mode, B-mode, and Doppler concepts.
 3. **Radar** — a 360° electronic scan detects targets on a PPI-style display.
 
+<p align="center">
+  <img src="frontend/public/docs/pics/overview.png" alt="Overview" width="850">
+</p>
+
 The goal is not only to show final plots, but to let the user change parameters and immediately see how the physics changes.
-
----
-
-## Demo Preview
-
-
-### 5G Auto-Steering Demo
-
-<p align="center">
-  <img src="frontend/public/docs/gifs/fiveg-auto-steering-demo.gif" alt="5G auto steering demo" width="850">
-</p>
-
-### Ultrasound A/B/Doppler Demo
-
-<p align="center">
-  <img src="frontend/public/docs/gifs/ultrasound-demo.gif" alt="Ultrasound simulator demo" width="850">
-</p>
-
-### Radar 360° Scan Demo
-
-<p align="center">
-  <img src="frontend/public/docs/gifs/radar-scan-demo.gif" alt="Radar simulator demo" width="850">
-</p>
 
 ---
 
 ## Main Features and Demo Preview
 
-# Beamforming Core Demo
+### Beamforming Core Demo
 
 <p align="center">
   <img src="frontend/public/docs/gifs/beamforming-core-demo.gif" alt="Beamforming core demo" width="850">
 </p>
 
-### General Beamforming Core
+### Beamforming Core
 
 - Uniform Linear Array simulation.
 - Real-time control of array parameters.
@@ -84,6 +64,12 @@ The goal is not only to show final plots, but to let the user change parameters 
 
 ### 5G Simulator
 
+### 5G Auto-Steering Demo
+
+<p align="center">
+  <img src="frontend/public/docs/gifs/fiveg-auto-steering-demo.gif" alt="5G auto steering demo" width="850">
+</p>
+
 - Three tower system with two movable users.
 - Auto-steering beams toward users.
 - Connectivity check based on coverage radius and received signal power.
@@ -92,7 +78,14 @@ The goal is not only to show final plots, but to let the user change parameters 
 - Interactive canvas with draggable towers/users and keyboard user movement.
 - Per-tower parameter updates.
 
+
 ### Ultrasound Simulator
+
+### Ultrasound A/B/Doppler Demo
+
+<p align="center">
+  <img src="frontend/public/docs/gifs/ultrasound-demo.gif" alt="Ultrasound simulator demo" width="850">
+</p>
 
 - Shepp–Logan phantom representation.
 - Editable tissue properties and vessel parameters.
@@ -102,6 +95,13 @@ The goal is not only to show final plots, but to let the user change parameters 
 - Uses ultrasound-specific propagation speed and MHz-frequency range.
 
 ### Radar Simulator
+
+### Radar 360° Scan Demo
+
+<p align="center">
+  <img src="frontend/public/docs/gifs/radar-scan-demo.gif" alt="Radar simulator demo" width="850">
+</p>
+
 
 - 360° electronic beam sweep.
 - PPI-style radar display.
@@ -418,39 +418,6 @@ http://localhost:3000
 
 ---
 
-## Screenshots
-
-### Home Page
-
-<p align="center">
-  <img src="frontend/public/docs/screenshots/home.png" alt="Home page" width="900">
-</p>
-
-### Beamforming Core
-
-<p align="center">
-  <img src="frontend/public/docs/screenshots/beamforming-core.png" alt="Beamforming core" width="900">
-</p>
-
-### 5G Simulator
-
-<p align="center">
-  <img src="frontend/public/docs/screenshots/fiveg-simulator.png" alt="5G simulator" width="900">
-</p>
-
-### Ultrasound Simulator
-
-<p align="center">
-  <img src="frontend/public/docs/screenshots/ultrasound-simulator.png" alt="Ultrasound simulator" width="900">
-</p>
-
-### Radar Simulator
-
-<p align="center">
-  <img src="frontend/public/docs/screenshots/radar-simulator.png" alt="Radar simulator" width="900">
-</p>
-
----
 
 ## Notes
 
