@@ -3,7 +3,7 @@
 > Interactive simulation platform for visualizing phased-array beamforming and its applications in **wireless communication, medical ultrasound, and radar systems**.
 
 <p align="center">
-  <img src="frontend/public/docs/screenshots/home.png" alt="BeamSim home page" width="900">
+  <img src="frontend/public/docs/pics/overview.png" alt="BeamSim home page" width="900">
 </p>
 
 <p align="center">
@@ -36,9 +36,6 @@ The project includes a general **2D beamforming core**, then applies the same be
 2. **Medical ultrasound** — a probe scans a tissue phantom using A-mode, B-mode, and Doppler concepts.
 3. **Radar** — a 360° electronic scan detects targets on a PPI-style display.
 
-<p align="center">
-  <img src="frontend/public/docs/pics/overview.png" alt="Overview" width="850">
-</p>
 
 The goal is not only to show final plots, but to let the user change parameters and immediately see how the physics changes.
 
