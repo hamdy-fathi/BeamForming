@@ -452,21 +452,43 @@ http://localhost:3000
 
 ---
 
-## Team
-
-**SBEng205 — Spring 2026 — Task 4**  
-**Team 10**
-
-Add team members here:
-
-- Member 1
-- Member 2
-- Member 3
-- Member 4
-- Member 5
-
----
-
 ## Notes
 
 This project was built as an educational beamforming simulator. It focuses on helping users visually understand how phased arrays work and how the same concept appears in communication, ultrasound imaging, and radar scanning.
+
+---
+
+## Contributors
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/hamdy-fathi">
+        <img src="https://avatars.githubusercontent.com/u/183446123?v=4" width="90px;" style="border-radius:50%"/><br/>
+        <sub><b>Hamdy Ahmed</b></sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/OmegasHyper">
+        <img src="https://avatars.githubusercontent.com/u/180775212?v=4" width="90px;" style="border-radius:50%"/><br/>
+        <sub><b>Mohamed Abdelrazek</b></sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/Chron1c-24">
+        <img src="https://avatars.githubusercontent.com/u/143766084?v=4" width="90px;" style="border-radius:50%"/><br/>
+        <sub><b>Yousef Samy</b></sub>
+      </a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/YomnaSabry172">
+        <img src="https://avatars.githubusercontent.com/u/80396445?v=4" width="90px;" style="border-radius:50%"/><br/>
+        <sub><b>Youmna Sabry</b></sub>
+      </a>
+    </td>
+  </tr>
+</table>
+
+</div>
