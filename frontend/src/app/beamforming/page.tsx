@@ -44,8 +44,8 @@ function Slider({ label, value, min, max, step, unit, onChange }: {
           {typeof value === "number" && value >= 1e6
             ? `${(value / 1e6).toFixed(1)} M`
             : typeof value === "number" && value >= 1e3
-            ? `${(value / 1e3).toFixed(1)} k`
-            : Number(value).toFixed(step < 1 ? 2 : 0)}
+              ? `${(value / 1e3).toFixed(1)} k`
+              : Number(value).toFixed(step < 1 ? 2 : 0)}
           {unit ? ` ${unit}` : ""}
         </span>
       </div>
@@ -68,7 +68,7 @@ export default function BeamformingPage() {
 
   // load windows list
   useEffect(() => {
-    getWindows().then((d) => setWindows(d.windows)).catch(() => {});
+    getWindows().then((d) => setWindows(d.windows)).catch(() => { });
   }, []);
 
   // debounced compute
@@ -314,7 +314,7 @@ export default function BeamformingPage() {
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.lineTo(((angles[angles.length-1] + 90) / 180) * W, H);
+    ctx.lineTo(((angles[angles.length - 1] + 90) / 180) * W, H);
     ctx.lineTo(((angles[0] + 90) / 180) * W, H);
     ctx.closePath();
     ctx.fillStyle = "rgba(6, 182, 212, 0.08)";
@@ -507,7 +507,7 @@ export default function BeamformingPage() {
 
   const mediumPreset =
     params.medium_speed === 3e8 ? "em" :
-    params.medium_speed === 1540 ? "tissue" : "custom";
+      params.medium_speed === 1540 ? "tissue" : "custom";
 
   return (
     <div className="mx-auto max-w-screen-2xl p-5">
@@ -535,100 +535,84 @@ export default function BeamformingPage() {
 
           <Section icon="📡" title="Array Configuration" color="#06b6d4">
 
-          <Slider
-            label="Number of Elements"
-            value={params.num_elements}
-            min={2} max={128} step={1}
-            onChange={(v) => updateParam("num_elements", v)}
-          />
-          <Slider
-            label="Element Spacing (λ)"
-            value={params.element_spacing}
-            min={0.1} max={2.0} step={0.05} unit="λ"
-            onChange={(v) => updateParam("element_spacing", v)}
-          />
-          <Slider
-            label="Steering Angle"
-            value={params.steering_angle}
-            min={-90} max={90} step={1} unit="°"
-            onChange={(v) => updateParam("steering_angle", v)}
-          />
-          <Slider
-            label="Phase Offset"
-            value={params.phase_offset}
-            min={0} max={6.28} step={0.01} unit="rad"
-            onChange={(v) => updateParam("phase_offset", v)}
-          />
+            <Slider
+              label="Number of Elements"
+              value={params.num_elements}
+              min={2} max={128} step={1}
+              onChange={(v) => updateParam("num_elements", v)}
+            />
+            <Slider
+              label="Element Spacing (λ)"
+              value={params.element_spacing}
+              min={0.1} max={2.0} step={0.05} unit="λ"
+              onChange={(v) => updateParam("element_spacing", v)}
+            />
+            <Slider
+              label="Steering Angle"
+              value={params.steering_angle}
+              min={-90} max={90} step={1} unit="°"
+              onChange={(v) => updateParam("steering_angle", v)}
+            />
+
           </Section>
 
           <Section icon="📡" title="Signal & Medium" color="#3b82f6">
-          <Slider
-            label="Frequency"
-            value={params.frequency}
-            min={1e6} max={30e9} step={1e6} unit="Hz"
-            onChange={(v) => updateParam("frequency", v)}
-          />
-          {/* Wavelength — computed from λ = c / f, inversely linked */}
-          <Slider
-            label="Wavelength (λ)"
-            value={params.medium_speed / params.frequency}
-            min={params.medium_speed / 30e9}
-            max={params.medium_speed / 1e6}
-            step={params.medium_speed / 30e9 / 10}
-            unit="m"
-            onChange={(lambda) => {
-              const newFreq = Math.round(params.medium_speed / lambda);
-              updateParam("frequency", Math.max(1e6, Math.min(30e9, newFreq)));
-            }}
-          />
-          <Slider
-            label="SNR"
-            value={params.snr}
-            min={0} max={1000} step={1}
-            onChange={(v) => updateParam("snr", v)}
-          />
-
-          {/* Medium Speed */}
-          <div className="flex flex-col gap-2">
-            <div className="segment-control">
-              <button
-                onClick={() => handleMediumPreset("em")}
-                className={`segment-btn ${mediumPreset === "em" ? "active" : ""}`}
-                style={{ '--seg-color': '#06b6d4' } as any}
-              >
-                EM Wave
-                <span className="seg-sub">3×10⁸ m/s</span>
-              </button>
-              <button
-                onClick={() => handleMediumPreset("tissue")}
-                className={`segment-btn ${mediumPreset === "tissue" ? "active" : ""}`}
-                style={{ '--seg-color': '#ef4444' } as any}
-              >
-                Sound / Tissue
-                <span className="seg-sub">1540 m/s</span>
-              </button>
-            </div>
             <Slider
-              label="Medium Speed"
-              value={params.medium_speed}
-              min={300} max={3e8} step={10} unit="m/s"
-              onChange={(v) => updateParam("medium_speed", v)}
+              label="Frequency"
+              value={params.frequency}
+              min={1e6} max={30e9} step={1e6} unit="Hz"
+              onChange={(v) => updateParam("frequency", v)}
             />
-          </div>
+            {/* Wavelength — computed from λ = c / f, inversely linked */}
 
-          {/* Signal Type */}
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-text-secondary">Signal Type</span>
-            <select
-              value={params.signal_type}
-              onChange={(e) => updateParam("signal_type", e.target.value)}
-              className="rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary outline-none"
-            >
-              <option value="sine">Sine</option>
-              <option value="cosine">Cosine</option>
-              <option value="pulse">Pulse</option>
-            </select>
-          </div>
+            <Slider
+              label="SNR"
+              value={params.snr}
+              min={0} max={1000} step={1}
+              onChange={(v) => updateParam("snr", v)}
+            />
+
+            {/* Medium Speed */}
+            <div className="flex flex-col gap-2">
+              <div className="segment-control">
+                <button
+                  onClick={() => handleMediumPreset("em")}
+                  className={`segment-btn ${mediumPreset === "em" ? "active" : ""}`}
+                  style={{ '--seg-color': '#06b6d4' } as any}
+                >
+                  EM Wave
+                  <span className="seg-sub">3×10⁸ m/s</span>
+                </button>
+                <button
+                  onClick={() => handleMediumPreset("tissue")}
+                  className={`segment-btn ${mediumPreset === "tissue" ? "active" : ""}`}
+                  style={{ '--seg-color': '#ef4444' } as any}
+                >
+                  Sound / Tissue
+                  <span className="seg-sub">1540 m/s</span>
+                </button>
+              </div>
+              <Slider
+                label="Medium Speed"
+                value={params.medium_speed}
+                min={300} max={3e8} step={10} unit="m/s"
+                onChange={(v) => updateParam("medium_speed", v)}
+              />
+            </div>
+
+            {/* Signal Type */}
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Signal Type</span>
+              <select
+                value={params.signal_type}
+                onChange={(e) => updateParam("signal_type", e.target.value)}
+                className="rounded-lg border border-border bg-bg-elevated px-3 py-2 text-sm text-text-primary outline-none"
+              >
+                <option value="sine">Sine</option>
+                <option value="cosine">Cosine</option>
+                <option value="pulse">Pulse</option>
+              </select>
+            </div>
           </Section>
 
           <Section icon="🎯" title="Apodization" color="#a855f7">
@@ -666,12 +650,12 @@ export default function BeamformingPage() {
               className="mt-1 w-full rounded-lg"
               style={{ height: 80, border: '1px solid #1e2433' }}
             />
-          <Slider
-            label="Map Resolution"
-            value={params.map_resolution}
-            min={50} max={800} step={10}
-            onChange={(v) => updateParam("map_resolution", v)}
-          />
+            <Slider
+              label="Map Resolution"
+              value={params.map_resolution}
+              min={50} max={800} step={10}
+              onChange={(v) => updateParam("map_resolution", v)}
+            />
           </Section>
         </div>
 

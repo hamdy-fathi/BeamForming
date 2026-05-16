@@ -51,7 +51,7 @@ class RadarSimulator:
         element_spacing: float = 0.5,
         frequency: float     = 3e9,
         window_type: str     = "hamming",
-        snr: float           = 200.0,
+        snr: float           = 1000.0,
         max_range: float     = None,   # defaults to DEFAULT_MAX_RANGE
         num_range_bins: int  = NUM_RANGE_BINS,
     ) -> dict:
@@ -165,7 +165,7 @@ class RadarSimulator:
         element_spacing: float = 0.5,
         frequency: float     = 3e9,
         window_type: str     = "hamming",
-        snr: float           = 200.0,
+        snr: float           = 1000.0,
         max_range: float     = None,  
     ) -> list[dict]:
         """Perform scan over a sector of angles — **vectorized**.
